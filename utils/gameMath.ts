@@ -109,6 +109,22 @@ export const calculateConservativePower = (adventurer: Adventurer, state: GameSt
     return calculateAdventurerPower(effectiveAdv, state);
 };
 
+// Calculates an "Item Score" for comparison purposes
+export const calculateItemRating = (item: Item): number => {
+    let score = 0;
+    item.stats.forEach(stat => {
+        // Weights calibrated to reflect approximate contribution to power
+        if (stat.name === 'Damage') score += stat.value * 5; 
+        else if (stat.name === 'Health') score += stat.value * 1; 
+        else if (stat.name === 'Speed') score += stat.value * 10;
+        else if (stat.name === 'Crit Chance') score += stat.value * 8;
+        else if (stat.name === 'Gold Gain') score += stat.value * 3;
+        else if (stat.name === 'Loot Luck') score += stat.value * 3;
+        else score += stat.value;
+    });
+    return Math.floor(score);
+};
+
 export const calculateAdventurerDps = (adventurer: Adventurer, state: GameState): number => {
     const stats = getAdventurerStats(adventurer, state);
     return (stats.damage * (1 + stats.critChance)) * stats.speed;

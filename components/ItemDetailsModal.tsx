@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Item, ItemType, Rarity, Adventurer } from '../types';
-import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual } from '../utils/gameMath';
+import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual, calculateItemRating } from '../utils/gameMath';
 import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight } from 'lucide-react';
 import { RARITY_COLORS, MAX_STATS_BY_RARITY, ADVENTURER_RARITY_MULTIPLIERS, STAT_TIER_COLORS } from '../constants';
 import { ItemIcon } from './ItemIcon';
@@ -77,6 +77,9 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
         enchant: calculateItemUpgradeCost(currentItem, 'ENCHANT'),
         reroll: calculateItemUpgradeCost(currentItem, 'REROLL')
     };
+    
+    // Calculate Score
+    const rating = calculateItemRating(currentItem);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -108,9 +111,17 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                             )}
                         </div>
                     </div>
-                    <button onClick={onClose} className="text-slate-500 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors">
-                        <X size={24} />
-                    </button>
+                    
+                    {/* Right Side: Score & Close */}
+                    <div className="flex items-start gap-4">
+                        <div className="text-right">
+                            <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Item Power</div>
+                            <div className="text-2xl font-mono font-bold text-indigo-400 leading-none">{formatNumber(rating)}</div>
+                        </div>
+                        <button onClick={onClose} className="text-slate-500 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors">
+                            <X size={24} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Tabs */}
