@@ -97,6 +97,14 @@ export interface Dungeon {
   recommendedPower: number;
 }
 
+export interface RunSnapshot {
+    dps: number;
+    power: number;
+    goldBonus: number;
+    xpBonus: number;
+    lootBonus: number;
+}
+
 export interface ActiveRun {
   id: string; 
   dungeonId: string;
@@ -106,6 +114,11 @@ export interface ActiveRun {
   runsRemaining: number;
   totalRuns: number;
   autoRepeat: boolean; 
+  snapshot: RunSnapshot;
+  // Snapshot of the specific adventurers (stats/gear) at the start of the run
+  adventurerState: Record<string, Adventurer>;
+  // Tracks slots that have been changed during the run (to force Pending state)
+  modifiedSlots?: Record<string, ItemType[]>;
 }
 
 export interface Upgrade {

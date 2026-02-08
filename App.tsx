@@ -8,7 +8,7 @@ import { GuildPanel } from './components/GuildPanel';
 import { PrestigePanel } from './components/PrestigePanel';
 import { DungeonResultModal } from './components/DungeonResultModal';
 import { SaveLoadModal } from './components/SaveLoadModal';
-import { formatNumber, calculateAdventurerPower } from './utils/gameMath';
+import { formatNumber, calculateConservativePower } from './utils/gameMath';
 import { LayoutDashboard, Users, Swords, Package, Landmark, Settings, Crown } from 'lucide-react';
 
 const AppContent: React.FC = () => {
@@ -16,7 +16,11 @@ const AppContent: React.FC = () => {
   const [view, setView] = useState<'DASHBOARD' | 'ADVENTURERS' | 'INVENTORY' | 'GUILD' | 'PRESTIGE'>('DASHBOARD');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  const totalGuildPower = state.adventurers.reduce((sum, adv) => sum + calculateAdventurerPower(adv, state), 0);
+  // Calculate Total Power using CONSERVATIVE stats via helper
+  // This ensures that modified slots during a run contribute 0 power (Pending state)
+  const totalGuildPower = state.adventurers.reduce((sum, adv) => {
+      return sum + calculateConservativePower(adv, state);
+  }, 0);
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">

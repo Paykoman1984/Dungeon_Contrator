@@ -1,11 +1,18 @@
 
-import { Adventurer, Item, ItemType, Rarity, ItemStat, GameState, AdventurerRole, WeaponType } from '../types';
+import { Adventurer, Item, ItemType, Rarity, ItemStat, GameState, AdventurerRole, WeaponType, RunSnapshot } from '../types';
 import { UPGRADES, CLASS_SKILLS, ROLE_CONFIG, ADVENTURER_RARITY_MULTIPLIERS, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, TIER_WEIGHTS, TIER_MULTIPLIERS, CRAFTING_RARITY_MULTIPLIERS, ENCHANT_COST_BASE, REROLL_COST_BASE } from '../constants';
 
 export const formatNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(2) + 'M';
   if (num >= 1_000) return (num / 1_000).toFixed(1) + 'k';
   return Math.floor(num).toString();
+};
+
+export const areItemsEqual = (itemA: Item | null, itemB: Item | null): boolean => {
+    if (itemA === null && itemB === null) return true;
+    if (itemA === null || itemB === null) return false;
+    // Strict comparison of ID and Stats structure
+    return itemA.id === itemB.id && JSON.stringify(itemA.stats) === JSON.stringify(itemB.stats);
 };
 
 interface EffectiveStats {
@@ -79,6 +86,29 @@ export const calculateAdventurerPower = (adventurer: Adventurer, state: GameStat
   return Math.floor(power);
 };
 
+// Calculates power treating "Pending" (modified) slots as empty to prevent power exploitation during runs
+export const calculateConservativePower = (adventurer: Adventurer, state: GameState): number => {
+    const run = state.activeRuns.find(r => r.adventurerIds.includes(adventurer.id));
+    
+    // Create a shallow copy of the adventurer to modify slots for calculation
+    const effectiveAdv = { ...adventurer, slots: { ...adventurer.slots } };
+
+    if (run) {
+        // If busy, check for modifications
+        const mods = run.modifiedSlots?.[adventurer.id] || [];
+        
+        ([ItemType.WEAPON, ItemType.ARMOR, ItemType.TRINKET] as ItemType[]).forEach(type => {
+            if (mods.includes(type)) {
+                // If modified/dirty, it contributes 0 power (Pending state) until run finishes
+                effectiveAdv.slots[type] = null;
+            }
+            // If not modified, we trust the live slot (as it matches snapshot)
+        });
+    }
+
+    return calculateAdventurerPower(effectiveAdv, state);
+};
+
 export const calculateAdventurerDps = (adventurer: Adventurer, state: GameState): number => {
     const stats = getAdventurerStats(adventurer, state);
     return (stats.damage * (1 + stats.critChance)) * stats.speed;
@@ -120,6 +150,45 @@ export const calculateDungeonDuration = (baseDuration: number, state: GameState)
   const reduction = UPGRADES.find(u => u.id === 'logistics_network')?.effect(speedLevel) || 0;
   const effectiveReduction = Math.min(reduction, 0.5);
   return Math.max(1, baseDuration * (1 - effectiveReduction));
+};
+
+export const calculateRunSnapshot = (adventurerIds: string[], state: GameState): RunSnapshot => {
+    // 1. DPS
+    const dps = calculatePartyDps(adventurerIds, state);
+
+    // 2. Power (For overpowered calculation)
+    const power = adventurerIds.reduce((sum, id) => {
+        const adv = state.adventurers.find(a => a.id === id);
+        return sum + (adv ? calculateAdventurerPower(adv, state) : 0);
+    }, 0);
+
+    // 3. Bonuses (Global Upgrades + Gear Stats)
+    // Economy
+    const ecoLevel = state.upgrades['marketplace_connections'] || 0;
+    const ecoBonus = UPGRADES.find(u => u.id === 'marketplace_connections')?.effect(ecoLevel) || 0;
+    const legacyLevel = state.prestigeUpgrades['legacy_wealth'] || 0;
+    const legacyBonus = PRESTIGE_UPGRADES.find(u => u.id === 'legacy_wealth')?.effect(legacyLevel) || 0;
+    const gearGoldBonus = calculatePartyStat(adventurerIds, state, 'Gold Gain') / 100;
+    const totalGoldBonus = ecoBonus + legacyBonus + gearGoldBonus;
+
+    // XP
+    const renownLevel = state.prestigeUpgrades['renowned_guild'] || 0;
+    const renownBonus = PRESTIGE_UPGRADES.find(u => u.id === 'renowned_guild')?.effect(renownLevel) || 0;
+    const totalXpBonus = renownBonus; 
+
+    // Loot
+    const lootLevel = state.upgrades['loot_logic'] || 0;
+    const lootBonus = UPGRADES.find(u => u.id === 'loot_logic')?.effect(lootLevel) || 0;
+    const gearLootBonus = calculatePartyStat(adventurerIds, state, 'Loot Luck') / 100;
+    const totalLootBonus = lootBonus + gearLootBonus;
+
+    return {
+        dps,
+        power,
+        goldBonus: totalGoldBonus,
+        xpBonus: totalXpBonus,
+        lootBonus: totalLootBonus
+    };
 };
 
 export const generateAdventurer = (id: string, name: string): Adventurer => {

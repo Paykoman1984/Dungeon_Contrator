@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Item, ItemType, Rarity, Adventurer } from '../types';
-import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost } from '../utils/gameMath';
-import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User } from 'lucide-react';
+import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual } from '../utils/gameMath';
+import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight } from 'lucide-react';
 import { RARITY_COLORS, MAX_STATS_BY_RARITY, ADVENTURER_RARITY_MULTIPLIERS, STAT_TIER_COLORS } from '../constants';
 import { ItemIcon } from './ItemIcon';
 
@@ -31,7 +31,34 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
     if (holder) isEquipped = true;
 
     // Check if holder is busy (in run)
-    const isBusy = holder ? state.activeRuns.some(r => r.adventurerIds.includes(holder!.id)) : false;
+    const run = holder ? state.activeRuns.find(r => r.adventurerIds.includes(holder!.id)) : undefined;
+    const isBusy = !!run;
+    
+    // Check if pending changes (Slot specific comparison)
+    let isPending = false;
+    if (holder && isBusy && run && run.adventurerState && slotType) {
+        const snapshotAdv = run.adventurerState[holder.id];
+        // Only proceed if snapshot exists (migrated runs)
+        if (snapshotAdv) {
+            const snapshotItem = snapshotAdv.slots[slotType];
+            
+            // Find live item from state because 'item' prop might be stale if we just modified it
+            let liveItem = state.inventory.find(i => i.id === item.id);
+            if (!liveItem && holder && slotType) {
+                const currentHolder = state.adventurers.find(a => a.id === holder!.id);
+                if (currentHolder) {
+                    liveItem = currentHolder.slots[slotType];
+                }
+            }
+            const checkItem = liveItem || item;
+
+            // Check if slot was modified or items differ
+            const isModified = run.modifiedSlots?.[holder.id]?.includes(slotType);
+            if (isModified || !areItemsEqual(checkItem, snapshotItem)) {
+                isPending = true;
+            }
+        }
+    }
 
     // Find live item from state (to get updates during modal lifespan)
     let liveItem: Item | undefined = state.inventory.find(i => i.id === item.id);
@@ -143,9 +170,16 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                     </div>
                                 </div>
                                 {isEquipped && isBusy && (
-                                    <div className="text-xs text-amber-500 bg-amber-900/20 px-2 py-1 rounded border border-amber-900/50 font-bold">
-                                        BUSY IN DUNGEON
-                                    </div>
+                                    isPending ? (
+                                        <div className="flex items-center gap-1 text-xs text-amber-500 bg-amber-900/20 px-2 py-1 rounded border border-amber-900/50 font-bold">
+                                            <RefreshCw size={12} className="animate-spin-slow-reverse" />
+                                            <span>Changes Apply Next Run</span>
+                                        </div>
+                                    ) : (
+                                        <div className="text-xs text-green-500 bg-green-900/20 px-2 py-1 rounded border border-green-900/50 font-bold">
+                                            Active (Current Gear)
+                                        </div>
+                                    )
                                 )}
                             </div>
 
@@ -156,15 +190,11 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                         if (holder && slotType) unequipItem(holder.id, slotType);
                                         onClose();
                                     }}
-                                    disabled={isBusy}
                                     className={`w-full py-3 rounded-lg font-bold border flex items-center justify-center gap-2 transition-all
-                                        ${isBusy 
-                                            ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed' 
-                                            : 'bg-red-900/20 text-red-400 border-red-900/50 hover:bg-red-900/40 hover:text-red-200'
-                                        }
+                                        bg-red-900/20 text-red-400 border-red-900/50 hover:bg-red-900/40 hover:text-red-200
                                     `}
                                 >
-                                    {isBusy ? <Ban size={18} /> : <X size={18} />}
+                                    <X size={18} />
                                     Unequip Item
                                 </button>
                             ) : (
@@ -178,6 +208,25 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                 const compatible = !currentItem.classRestriction || currentItem.classRestriction.includes(adv.role);
                                                 const currentEquipped = adv.slots[currentItem.type];
                                                 
+                                                // Check pending logic for list items if they are busy
+                                                let advPending = false;
+                                                if(advBusy) {
+                                                    const run = state.activeRuns.find(r => r.adventurerIds.includes(adv.id));
+                                                    if(run && run.adventurerState) {
+                                                        const snapshotAdv = run.adventurerState[adv.id];
+                                                        if (snapshotAdv) {
+                                                            const snapshotItem = snapshotAdv.slots[currentItem.type];
+                                                            
+                                                            // Logic: If I equip THIS item, is it different from what is currently fighting?
+                                                            // OR if this slot is already modified
+                                                            const isModified = run.modifiedSlots?.[adv.id]?.includes(currentItem.type);
+                                                            if (isModified || !areItemsEqual(currentItem, snapshotItem)) {
+                                                                advPending = true;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
                                                 return (
                                                     <button
                                                         key={adv.id}
@@ -185,10 +234,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                             equipItem(adv.id, currentItem);
                                                             onClose();
                                                         }}
-                                                        disabled={advBusy || !compatible}
+                                                        disabled={!compatible}
                                                         className={`
                                                             flex flex-col p-3 rounded border text-left transition-all
-                                                            ${advBusy || !compatible 
+                                                            ${!compatible 
                                                                 ? 'bg-slate-900/50 text-slate-600 border-slate-800 opacity-60' 
                                                                 : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-indigo-500 hover:bg-slate-700'
                                                             }
@@ -198,6 +247,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                             <span className="text-sm font-bold flex items-center gap-2">
                                                                 {adv.name}
                                                                 {compatible && !advBusy && <Check size={14} className="text-indigo-500" />}
+                                                                {advBusy && advPending && <RefreshCw size={12} className="text-amber-500" />}
                                                             </span>
                                                             <span className="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono">
                                                                 {calculateAdventurerPower(adv, state)} PWR
@@ -231,7 +281,13 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                         {/* Status Messages */}
                                                         <div className="flex gap-2 mt-2 justify-end">
                                                             {!compatible && <span className="text-[10px] text-red-500 font-bold uppercase">{adv.role} Only</span>}
-                                                            {advBusy && <span className="text-[10px] text-amber-500 font-bold uppercase">Busy</span>}
+                                                            {advBusy && (
+                                                                advPending ? (
+                                                                    <span className="text-[10px] text-amber-500 font-bold uppercase flex items-center gap-1"><RefreshCw size={10} /> Queued</span>
+                                                                ) : (
+                                                                    <span className="text-[10px] text-green-500 font-bold uppercase">Active</span>
+                                                                )
+                                                            )}
                                                         </div>
                                                     </button>
                                                 )
@@ -259,10 +315,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
 
                     {tab === 'CRAFT' && (
                          <div className="space-y-4 animate-in fade-in duration-200">
-                             {isBusy && (
+                             {isBusy && isPending && (
                                  <div className="bg-amber-900/20 border border-amber-500/30 p-3 rounded text-amber-200 text-sm flex items-center gap-2 mb-2">
-                                     <Ban size={16} />
-                                     Cannot modify gear while contractor is on a mission.
+                                     <RefreshCw size={16} className="animate-spin-slow-reverse" />
+                                     Contractor is busy. Stat changes will apply to the next run.
                                  </div>
                              )}
 
@@ -282,10 +338,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                              </div>
                                              <button
                                                 onClick={() => rerollStat(currentItem.id, idx)}
-                                                disabled={!canAfford || isBusy}
+                                                disabled={!canAfford}
                                                 className={`
                                                     px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 border transition-colors
-                                                    ${!canAfford || isBusy
+                                                    ${!canAfford
                                                         ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
                                                         : 'bg-indigo-900/30 text-indigo-300 border-indigo-500/30 hover:bg-indigo-600 hover:text-white'
                                                     }
@@ -307,10 +363,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                               </div>
                                               <button
                                                 onClick={() => enchantItem(currentItem.id)}
-                                                disabled={!canAfford || isBusy}
+                                                disabled={!canAfford}
                                                 className={`
                                                     px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 border transition-colors
-                                                    ${!canAfford || isBusy
+                                                    ${!canAfford
                                                         ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
                                                         : 'bg-emerald-900/30 text-emerald-300 border-emerald-500/30 hover:bg-emerald-600 hover:text-white'
                                                     }

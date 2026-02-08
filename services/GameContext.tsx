@@ -1,8 +1,8 @@
 
 import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
-import { GameState, Item, Adventurer, Dungeon, ActiveRun, ItemType, DungeonReport, AdventurerRole, Rarity } from '../types';
+import { GameState, Item, Adventurer, Dungeon, ActiveRun, ItemType, DungeonReport, AdventurerRole, Rarity, RunSnapshot } from '../types';
 import { DUNGEONS, INITIAL_GOLD, UPGRADES, INVENTORY_SIZE, ROLE_CONFIG, ENEMIES, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_RARITY_MULTIPLIERS, TIER_MULTIPLIERS } from '../constants';
-import { calculateAdventurerPower, calculateDungeonDuration, generateItem, generateAdventurer, calculatePartyDps, calculatePartyStat, calculatePrestigeGain, generateRandomAffix, rollStatTier, ITEM_RARITY_MULTIPLIERS, calculateItemUpgradeCost } from '../utils/gameMath';
+import { calculateAdventurerPower, calculateDungeonDuration, generateItem, generateAdventurer, calculatePartyDps, calculatePartyStat, calculatePrestigeGain, generateRandomAffix, rollStatTier, ITEM_RARITY_MULTIPLIERS, calculateItemUpgradeCost, calculateRunSnapshot } from '../utils/gameMath';
 
 const STORAGE_KEY = 'idle_dungeon_contractor_save_v1';
 
@@ -88,6 +88,18 @@ const gameReducer = (state: GameState, action: Action): GameState => {
       
       const duration = calculateDungeonDuration(dungeon.durationSeconds, state) * 1000;
       
+      // Calculate Snapshot
+      const snapshot = calculateRunSnapshot(action.payload.adventurerIds, state);
+
+      // Create Deep Copy of Adventurers for the Run Snapshot
+      const adventurerState: Record<string, Adventurer> = {};
+      action.payload.adventurerIds.forEach(id => {
+          const adv = state.adventurers.find(a => a.id === id);
+          if (adv) {
+              adventurerState[id] = JSON.parse(JSON.stringify(adv));
+          }
+      });
+
       return {
         ...state,
         lastParties: {
@@ -104,7 +116,10 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             duration: duration,
             runsRemaining: 1, 
             totalRuns: 1,     
-            autoRepeat: action.payload.autoRepeat
+            autoRepeat: action.payload.autoRepeat,
+            snapshot: snapshot,
+            adventurerState: adventurerState,
+            modifiedSlots: {} // Init empty modifications
           },
         ],
       };
@@ -131,11 +146,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
     case 'COMPLETE_DUNGEON': {
       const { runId, success, kills } = action.payload;
       
-      // CRITICAL FIX: Find the run in the CURRENT state. 
-      // Do not trust the 'run' object passed from useEffect, as it may be stale or modified (e.g. by Stop Repeat).
       const run = state.activeRuns.find(r => r.id === runId);
-      
-      // If run doesn't exist, it was probably cancelled or already completed.
       if (!run) return state;
 
       const dungeon = DUNGEONS.find(d => d.id === run.dungeonId);
@@ -150,15 +161,14 @@ const gameReducer = (state: GameState, action: Action): GameState => {
       let xpGain = 0;
       let droppedItems: Item[] = [];
 
+      // Use Snapshot for Calculations
+      const snapshot = run.snapshot || calculateRunSnapshot(run.adventurerIds, state); 
+
       if (success && kills > 0) {
         let rawGold = 0;
         let rawXp = 0;
 
-        const partyPower = run.adventurerIds.reduce((sum, id) => {
-             const adv = state.adventurers.find(a => a.id === id);
-             return sum + (adv ? calculateAdventurerPower(adv, state) : 0);
-        }, 0);
-        const isOverpowered = partyPower > (dungeon.recommendedPower * 3);
+        const isOverpowered = snapshot.power > (dungeon.recommendedPower * 3);
 
         if (isOverpowered) {
             rawGold = kills * enemy.goldMin;
@@ -184,30 +194,16 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             }
         }
         
-        // --- BONUS CALCULATIONS ---
-        const ecoLevel = state.upgrades['marketplace_connections'] || 0;
-        const ecoBonus = UPGRADES.find(u => u.id === 'marketplace_connections')?.effect(ecoLevel) || 0;
-        const legacyLevel = state.prestigeUpgrades['legacy_wealth'] || 0;
-        const legacyBonus = PRESTIGE_UPGRADES.find(u => u.id === 'legacy_wealth')?.effect(legacyLevel) || 0;
-        const itemGoldBonus = calculatePartyStat(run.adventurerIds, state, 'Gold Gain') / 100;
-        
-        goldGain = Math.floor(rawGold * (1 + ecoBonus + legacyBonus + itemGoldBonus));
-
-        const renownLevel = state.prestigeUpgrades['renowned_guild'] || 0;
-        const renownBonus = PRESTIGE_UPGRADES.find(u => u.id === 'renowned_guild')?.effect(renownLevel) || 0;
-        xpGain = Math.floor(rawXp * (1 + renownBonus));
+        goldGain = Math.floor(rawGold * (1 + snapshot.goldBonus));
+        xpGain = Math.floor(rawXp * (1 + snapshot.xpBonus));
 
         newGold += goldGain;
         newStats.totalGoldEarned += goldGain;
         newStats.dungeonsCleared += 1;
         newStats.monstersKilled += kills;
 
-        // Loot Logic: 
-        const lootLevel = state.upgrades['loot_logic'] || 0;
-        const lootBonus = UPGRADES.find(u => u.id === 'loot_logic')?.effect(lootLevel) || 0;
-        const itemLootBonus = calculatePartyStat(run.adventurerIds, state, 'Loot Luck') / 100;
-
-        const baseDropChance = dungeon.dropChance + lootBonus + itemLootBonus;
+        // Loot Logic
+        const baseDropChance = dungeon.dropChance + snapshot.lootBonus;
         
         const extraRolls = Math.floor(kills / 10);
         const totalRolls = 1 + extraRolls;
@@ -264,12 +260,27 @@ const gameReducer = (state: GameState, action: Action): GameState => {
       
       // Auto-Repeat Logic (Using the FRESH run object from state)
       if (run.autoRepeat || run.runsRemaining > 1) {
+          // Recalculate snapshot based on NEW state (new gear applied)
+          const nextSnapshot = calculateRunSnapshot(run.adventurerIds, { ...state, adventurers: newAdventurers, upgrades: state.upgrades });
+          
+          // Re-Capture Adventurer State for the NEW run
+          const nextAdventurerState: Record<string, Adventurer> = {};
+          run.adventurerIds.forEach(id => {
+              const adv = newAdventurers.find(a => a.id === id);
+              if (adv) {
+                  nextAdventurerState[id] = JSON.parse(JSON.stringify(adv));
+              }
+          });
+
           const restartedRun: ActiveRun = {
               ...run,
               id: crypto.randomUUID(), 
               runsRemaining: run.autoRepeat ? 1 : run.runsRemaining - 1,
               startTime: Date.now(),
-              duration: calculateDungeonDuration(dungeon.durationSeconds, state) * 1000
+              duration: calculateDungeonDuration(dungeon.durationSeconds, state) * 1000,
+              snapshot: nextSnapshot, 
+              adventurerState: nextAdventurerState,
+              modifiedSlots: {} // Clear modifications for fresh run
           };
           nextActiveRuns = [...nextActiveRuns, restartedRun];
       }
@@ -300,9 +311,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 
         const adv = { ...state.adventurers[advIndex] };
         
-        // CHECK RESTRICTIONS
         if (item.classRestriction && !item.classRestriction.includes(adv.role)) {
-            // Should technically be prevented by UI, but safety check here
             return state;
         }
 
@@ -317,11 +326,31 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 
         const newAdvs = [...state.adventurers];
         newAdvs[advIndex] = adv;
+        
+        // --- TRACK MODIFICATIONS IF BUSY ---
+        let newActiveRuns = state.activeRuns;
+        const activeRunIndex = state.activeRuns.findIndex(r => r.adventurerIds.includes(adventurerId));
+        if (activeRunIndex !== -1) {
+            newActiveRuns = [...state.activeRuns];
+            const run = { ...newActiveRuns[activeRunIndex] };
+            
+            const modifiedSlots = run.modifiedSlots ? { ...run.modifiedSlots } : {};
+            const advMods = modifiedSlots[adventurerId] ? [...modifiedSlots[adventurerId]] : [];
+            
+            if (!advMods.includes(item.type)) {
+                advMods.push(item.type);
+            }
+            
+            modifiedSlots[adventurerId] = advMods;
+            run.modifiedSlots = modifiedSlots;
+            newActiveRuns[activeRunIndex] = run;
+        }
 
         return {
             ...state,
             adventurers: newAdvs,
             inventory: newInv,
+            activeRuns: newActiveRuns
         };
     }
 
@@ -339,10 +368,30 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         const newAdvs = [...state.adventurers];
         newAdvs[advIndex] = adv;
 
+        // --- TRACK MODIFICATIONS IF BUSY ---
+        let newActiveRuns = state.activeRuns;
+        const activeRunIndex = state.activeRuns.findIndex(r => r.adventurerIds.includes(adventurerId));
+        if (activeRunIndex !== -1) {
+             newActiveRuns = [...state.activeRuns];
+             const run = { ...newActiveRuns[activeRunIndex] };
+             
+             const modifiedSlots = run.modifiedSlots ? { ...run.modifiedSlots } : {};
+             const advMods = modifiedSlots[adventurerId] ? [...modifiedSlots[adventurerId]] : [];
+             
+             if (!advMods.includes(slot)) {
+                 advMods.push(slot);
+             }
+             
+             modifiedSlots[adventurerId] = advMods;
+             run.modifiedSlots = modifiedSlots;
+             newActiveRuns[activeRunIndex] = run;
+        }
+
         return {
             ...state,
             adventurers: newAdvs,
-            inventory: [...state.inventory, item]
+            inventory: [...state.inventory, item],
+            activeRuns: newActiveRuns
         };
     }
 
@@ -708,6 +757,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (run.runsRemaining === undefined) {
                     return { ...run, runsRemaining: 1, totalRuns: 1 };
                 }
+                // V6 Logic: Ensure Snapshot exists
+                if (!run.snapshot) {
+                     // Legacy migration
+                }
+                // V7 Logic: Ensure AdventurerState exists for pending logic
+                if (!run.adventurerState) {
+                    run.adventurerState = {};
+                }
+                // V8 Logic: Ensure modifiedSlots exists
+                if (!run.modifiedSlots) {
+                    run.modifiedSlots = {};
+                }
                 return run;
             });
         }
@@ -747,8 +808,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // CALCULATE RESULTS
                 const enemy = ENEMIES[dungeon.enemyId];
                 if (enemy) {
-                    const partyDps = calculatePartyDps(run.adventurerIds, state);
-                    const totalDamage = partyDps * (run.duration / 1000);
+                    // Use Snapshot if available (New Logic), fallback to real-time (Old Logic - Migration)
+                    const dps = run.snapshot ? run.snapshot.dps : calculatePartyDps(run.adventurerIds, state);
+                    const totalDamage = dps * (run.duration / 1000);
                     const kills = Math.floor(totalDamage / enemy.hp);
                     const success = kills > 0;
 

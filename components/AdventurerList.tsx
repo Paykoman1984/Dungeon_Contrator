@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
-import { calculateAdventurerPower, formatNumber, getAdventurerStats } from '../utils/gameMath';
+import { calculateAdventurerPower, formatNumber, getAdventurerStats, areItemsEqual, calculateConservativePower } from '../utils/gameMath';
 import { ItemType, AdventurerRole, Item } from '../types';
-import { Sword, Shield, Gem, UserPlus, Heart, Zap, Crosshair, Sparkles, ShieldAlert } from 'lucide-react';
+import { Sword, Shield, Gem, UserPlus, Heart, Zap, Crosshair, Sparkles, ShieldAlert, RefreshCw } from 'lucide-react';
 import { RARITY_COLORS, ROLE_CONFIG, CLASS_SKILLS } from '../constants';
 import { Tooltip, SkillTooltipContent } from './Tooltip';
 import { ItemIcon } from './ItemIcon';
@@ -48,9 +48,18 @@ export const AdventurerList: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-4">
         {state.adventurers.map((adv) => {
-          const power = calculateAdventurerPower(adv, state);
-          const effectiveStats = getAdventurerStats(adv, state);
-          const isBusy = state.activeRuns.some(r => r.adventurerIds.includes(adv.id));
+          const run = state.activeRuns.find(r => r.adventurerIds.includes(adv.id));
+          const isBusy = !!run;
+          
+          const snapshotAdv = run?.adventurerState?.[adv.id];
+
+          // Calculate Power Conservatively using helper
+          const power = calculateConservativePower(adv, state);
+
+          // For stats display, we show what is currently equipped (Live) so user sees what they have changed
+          const activeAdv = (isBusy && snapshotAdv) ? snapshotAdv : adv;
+          const effectiveStats = getAdventurerStats(activeAdv, state);
+          
           const roleConfig = ROLE_CONFIG[adv.role];
           const skills = CLASS_SKILLS[adv.role];
           
@@ -131,7 +140,19 @@ export const AdventurerList: React.FC = () => {
                   {/* Loadout (Row of Boxes) */}
                   <div className="grid grid-cols-3 gap-2 mt-1">
                     {[ItemType.WEAPON, ItemType.ARMOR, ItemType.TRINKET].map(type => {
-                        const item = adv.slots[type];
+                        const item = adv.slots[type]; // The item currently in the slot (could be pending)
+                        
+                        // Check pending status
+                        let isPending = false;
+                        if (isBusy && snapshotAdv) {
+                             const snapshotItem = snapshotAdv.slots[type];
+                             // Check if slot was modified directly (touched) or if content differs
+                             const isModified = run.modifiedSlots?.[adv.id]?.includes(type);
+                             if (isModified || !areItemsEqual(item, snapshotItem)) {
+                                 isPending = true;
+                             }
+                        }
+
                         // Placeholder Icon if no item
                         let PlaceholderIcon = Sword;
                         if (type === ItemType.ARMOR) PlaceholderIcon = Shield;
@@ -143,7 +164,7 @@ export const AdventurerList: React.FC = () => {
                                 onClick={() => item && setSelectedItem(item)}
                                 disabled={!item}
                                 className={`
-                                    relative h-10 w-full rounded border flex items-center justify-center transition-all
+                                    relative h-10 w-full rounded border flex items-center justify-center transition-all overflow-hidden
                                     ${item 
                                         ? `${RARITY_COLORS[item.rarity]} bg-slate-800 border-slate-600 hover:border-indigo-500 hover:bg-slate-700 group cursor-pointer` 
                                         : 'text-slate-700 bg-slate-900/50 border-slate-800 border-dashed cursor-default'
@@ -154,9 +175,16 @@ export const AdventurerList: React.FC = () => {
                                     <>
                                        <ItemIcon item={item} size={14} />
                                        {/* Inspect Overlay */}
-                                       <div className="hidden group-hover:flex absolute inset-0 bg-slate-900/90 items-center justify-center text-[8px] font-bold text-white rounded">
+                                       <div className="hidden group-hover:flex absolute inset-0 bg-slate-900/90 items-center justify-center text-[8px] font-bold text-white rounded z-10">
                                            INSPECT
                                        </div>
+                                       
+                                       {/* Next Run Indicator - Only if this specific item slot changed */}
+                                       {isPending && (
+                                           <div className="absolute top-0 right-0 p-0.5 bg-amber-900/80 rounded-bl backdrop-blur-sm border-l border-b border-amber-500/30 z-0">
+                                                <RefreshCw size={8} className="text-amber-400 animate-spin-slow-reverse" />
+                                           </div>
+                                       )}
                                     </>
                                 ) : (
                                     <PlaceholderIcon size={14} />
