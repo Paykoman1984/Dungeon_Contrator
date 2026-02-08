@@ -1,0 +1,433 @@
+
+import React, { useState } from 'react';
+import { useGame } from '../services/GameContext';
+import { DUNGEONS, ENEMIES } from '../constants';
+import { calculateAdventurerPower, calculateDungeonDuration, calculatePartyDps, formatNumber } from '../utils/gameMath';
+import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords } from 'lucide-react';
+
+export const DungeonList: React.FC = () => {
+  const { state, startDungeon, cancelDungeon, stopRepeat } = useGame();
+  const [configuringDungeon, setConfiguringDungeon] = useState<string | null>(null);
+  const [selectedAdvIds, setSelectedAdvIds] = useState<string[]>([]);
+  const [isAutoRepeat, setIsAutoRepeat] = useState<boolean>(false);
+
+  const addToParty = (id: string) => {
+      if (selectedAdvIds.length >= 3) return; // Limit party size to 3
+      if (!selectedAdvIds.includes(id)) {
+          setSelectedAdvIds([...selectedAdvIds, id]);
+      }
+  };
+
+  const removeFromParty = (id: string) => {
+      setSelectedAdvIds(selectedAdvIds.filter(advId => advId !== id));
+  };
+
+  const startConfiguration = (dungeonId: string) => {
+      // Toggle off if clicking same
+      if (configuringDungeon === dungeonId) {
+          cancelConfiguration();
+          return;
+      }
+      setConfiguringDungeon(dungeonId);
+      setIsAutoRepeat(false); // Default to single run
+      
+      // Load last party or start empty
+      const lastParty = state.lastParties[dungeonId];
+      if (lastParty && lastParty.length > 0) {
+          // Filter out IDs that no longer exist (fired adventurers) OR are busy
+          // Also cap at 3 if legacy save had more
+          const validIds = lastParty.filter(id => {
+              const adv = state.adventurers.find(a => a.id === id);
+              if (!adv) return false;
+              // Check if busy in another run
+              const isBusy = state.activeRuns.some(r => r.adventurerIds.includes(id));
+              return !isBusy;
+          }).slice(0, 3);
+          setSelectedAdvIds(validIds);
+      } else {
+          setSelectedAdvIds([]); 
+      }
+  };
+
+  const cancelConfiguration = () => {
+      setConfiguringDungeon(null);
+      setSelectedAdvIds([]);
+      setIsAutoRepeat(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4">
+        {DUNGEONS.map(dungeon => {
+          // Get ALL active runs for this dungeon
+          const dungeonRuns = state.activeRuns.filter(r => r.dungeonId === dungeon.id);
+          const isConfiguring = configuringDungeon === dungeon.id;
+          const duration = calculateDungeonDuration(dungeon.durationSeconds, state);
+          const enemy = ENEMIES[dungeon.enemyId];
+
+          // Stats Calculation (for setup)
+          const currentPartyDps = calculatePartyDps(selectedAdvIds, state);
+          const currentPartyPower = selectedAdvIds.reduce((sum, id) => {
+              const adv = state.adventurers.find(a => a.id === id);
+              return sum + (adv ? calculateAdventurerPower(adv, state) : 0);
+          }, 0);
+
+          const estimatedKills = Math.floor((currentPartyDps * duration) / enemy.hp);
+          
+          // Overpowered check
+          const isOverpowered = currentPartyPower > (dungeon.recommendedPower * 3);
+          // Requirement check
+          const meetsPowerRequirement = currentPartyPower >= dungeon.recommendedPower;
+
+          // Estimate Averages for display
+          let avgGold = (enemy.goldMin + enemy.goldMax) / 2;
+          let avgXp = (enemy.xpMin + enemy.xpMax) / 2;
+          
+          if (isOverpowered) {
+              avgGold = enemy.goldMin;
+              avgXp = avgXp * 0.10;
+          }
+
+          const totalEstGold = estimatedKills * avgGold;
+          const totalEstXp = estimatedKills * avgXp;
+
+          // Validation
+          const busyMembers = state.adventurers.filter(a => selectedAdvIds.includes(a.id) && state.activeRuns.some(r => r.adventurerIds.includes(a.id)));
+          const isPartyBusy = busyMembers.length > 0;
+
+          return (
+            <div key={dungeon.id} className={`bg-slate-800 border ${isConfiguring ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-700'} rounded-lg overflow-hidden group relative transition-all`}>
+               
+               <div className="p-4 relative z-10">
+                   <div className="flex justify-between items-start">
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                                {dungeon.name}
+                                <span className="text-xs bg-slate-900 text-slate-400 px-2 py-0.5 rounded">Lvl {dungeon.level}</span>
+                            </h3>
+                            <p className="text-slate-400 text-sm">{dungeon.description}</p>
+                            
+                            <div className="flex flex-wrap gap-4 mt-2 text-xs text-slate-500">
+                                <span className="flex items-center gap-1"><Timer size={12}/> {duration.toFixed(0)}s</span>
+                                <span className="flex items-center gap-1 text-red-300"><Skull size={12}/> {enemy.name} ({formatNumber(enemy.hp)} HP)</span>
+                                <span className="flex items-center gap-1 text-orange-300 border border-orange-900/50 bg-orange-900/20 px-1.5 py-0.5 rounded">
+                                    <Swords size={12}/> Rec. {dungeon.recommendedPower} Power
+                                </span>
+                            </div>
+                            
+                            {/* Reward Info */}
+                            <div className="flex gap-3 mt-1 text-[10px] text-slate-600">
+                                <span>Rewards/Kill:</span>
+                                <span className="text-yellow-600">{enemy.goldMin}-{enemy.goldMax} Gold</span>
+                                <span className="text-blue-600">{enemy.xpMin}-{enemy.xpMax} XP</span>
+                            </div>
+                        </div>
+
+                        {/* Status / Action Button */}
+                        <div className="text-right">
+                            {!isConfiguring ? (
+                                <button
+                                    onClick={() => startConfiguration(dungeon.id)}
+                                    className="bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20 text-sm font-semibold px-4 py-2 rounded transition-colors"
+                                >
+                                    {dungeonRuns.length > 0 ? 'New Contract' : 'Select'}
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={cancelConfiguration}
+                                    className="text-slate-400 hover:text-white text-sm px-2 py-1"
+                                >
+                                    Close
+                                </button>
+                            )}
+                        </div>
+                   </div>
+
+                   {/* Active Runs List */}
+                   {dungeonRuns.length > 0 && (
+                       <div className="mt-4 pt-4 border-t border-slate-700/50">
+                           <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                               <Activity size={12} className="text-green-400"/> Active Operations ({dungeonRuns.length})
+                           </h4>
+                           <div className="space-y-2">
+                               {dungeonRuns.map((run) => {
+                                   const activeAdventurers = state.adventurers.filter(a => run.adventurerIds.includes(a.id));
+                                   const now = Date.now();
+                                   const progress = Math.min(100, ((now - run.startTime) / run.duration) * 100);
+                                   const isInfinite = run.autoRepeat;
+                                   
+                                   // Real-time projected kills for this run (visual only)
+                                   const runDps = calculatePartyDps(run.adventurerIds, state);
+                                   const runEstKills = Math.floor((runDps * (run.duration/1000)) / enemy.hp);
+
+                                   return (
+                                       <div key={run.id} className="bg-slate-900/50 rounded p-2 border border-slate-700/50 flex items-center gap-3 relative overflow-hidden group/run">
+                                           {/* Progress Bar Background */}
+                                           <div className="absolute bottom-0 left-0 h-0.5 bg-indigo-500/30 w-full">
+                                                <div className="h-full bg-indigo-500 transition-all duration-200" style={{ width: `${progress}%` }}></div>
+                                           </div>
+                                           
+                                           <div className="flex-1 min-w-0">
+                                               <div className="flex items-center gap-2 text-sm text-slate-300">
+                                                   <Users size={12} className="text-indigo-400"/>
+                                                   <span className="truncate">{activeAdventurers.map(a => a.name).join(', ')}</span>
+                                               </div>
+                                               <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+                                                   <Swords size={10} /> {formatNumber(runDps)} DPS
+                                                   <span className="text-slate-700">|</span>
+                                                   <Skull size={10} /> ~{runEstKills} Kills/Run
+                                               </div>
+                                           </div>
+                                           
+                                           <div className="flex items-center gap-2">
+                                                <div className="text-xs font-mono text-slate-500 flex items-center gap-2 mr-2">
+                                                    {isInfinite ? (
+                                                        <span className="text-indigo-400 flex items-center gap-1 font-bold">
+                                                            <Repeat size={10} className="animate-spin-slow" /> Auto
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-green-400 flex items-center gap-1 font-bold">
+                                                            <Activity size={10} /> Running
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                
+                                                {/* Stop Loop Button (Graceful Finish) */}
+                                                {isInfinite && (
+                                                    <button 
+                                                        onClick={() => stopRepeat(run.id)}
+                                                        className="px-2 py-1 rounded bg-amber-900/20 border border-amber-700/50 text-amber-400 hover:bg-amber-900/40 text-xs font-bold flex items-center gap-1 transition-colors"
+                                                        title="Finish this run and stop repeating"
+                                                    >
+                                                        <Square size={10} fill="currentColor" />
+                                                        Stop Loop
+                                                    </button>
+                                                )}
+
+                                                {/* Status Badge when stopping/single run */}
+                                                {!isInfinite && (
+                                                     <span className="text-[10px] uppercase font-bold text-slate-500 bg-slate-800 px-2 py-1 rounded border border-slate-700">
+                                                        Finishing...
+                                                     </span>
+                                                )}
+
+                                                {/* Force Cancel Button (Abort) */}
+                                                <button 
+                                                    onClick={() => cancelDungeon(run.id)}
+                                                    className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-900/10 transition-colors ml-1"
+                                                    title="Abort Immediately (No Rewards)"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                           </div>
+                                       </div>
+                                   );
+                               })}
+                           </div>
+                       </div>
+                   )}
+
+                   {/* Configuration Area */}
+                   {isConfiguring && (
+                       <div className="mt-6 pt-4 border-t border-slate-700 animate-in fade-in slide-in-from-top-2 duration-200">
+                           
+                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                               {/* Assigned Party */}
+                               <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 flex flex-col">
+                                   <div className="flex justify-between items-center mb-3">
+                                       <h4 className="text-sm font-bold text-indigo-300">Assigned Team <span className="text-slate-500">({selectedAdvIds.length}/3)</span></h4>
+                                   </div>
+                                   
+                                   <div className="space-y-2 flex-grow">
+                                       {selectedAdvIds.length === 0 ? (
+                                           <div className="h-full flex flex-col items-center justify-center text-xs text-slate-500 italic py-6 border-2 border-dashed border-slate-800 rounded bg-slate-900/20">
+                                               <Users size={24} className="mb-2 opacity-50"/>
+                                               No contractors assigned.<br/>Add from roster.
+                                           </div>
+                                       ) : (
+                                           selectedAdvIds.map(id => {
+                                               const adv = state.adventurers.find(a => a.id === id);
+                                               if(!adv) return null;
+                                               const isBusy = state.activeRuns.some(r => r.adventurerIds.includes(adv.id));
+                                               
+                                               return (
+                                                   <button 
+                                                        key={adv.id}
+                                                        onClick={() => removeFromParty(adv.id)}
+                                                        className={`
+                                                            w-full flex justify-between items-center p-2 rounded border group transition-all
+                                                            ${isBusy 
+                                                                ? 'bg-amber-900/10 border-amber-800/50 text-amber-200/50' 
+                                                                : 'bg-indigo-900/30 border-indigo-500/30 text-indigo-100 hover:bg-red-900/30 hover:border-red-500/50'
+                                                            }
+                                                        `}
+                                                   >
+                                                       <div className="flex items-center gap-2">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${isBusy ? 'bg-amber-800' : 'bg-indigo-500'}`}></div>
+                                                            <span className="text-sm font-medium">{adv.name}</span>
+                                                       </div>
+                                                       <div className="flex items-center gap-3">
+                                                           {isBusy && <span className="text-[10px] uppercase font-bold text-amber-500">Busy</span>}
+                                                           <span className={`text-xs font-mono ${isBusy ? 'text-slate-600' : 'text-indigo-300'}`}>{calculateAdventurerPower(adv, state)} Pwr</span>
+                                                           <X size={14} className="opacity-0 group-hover:opacity-100 text-red-400 transition-opacity"/>
+                                                       </div>
+                                                   </button>
+                                               );
+                                           })
+                                       )}
+                                   </div>
+                               </div>
+
+                               {/* Available Roster */}
+                               <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 flex flex-col">
+                                   <div className="flex justify-between items-center mb-3">
+                                       <h4 className="text-sm font-bold text-slate-400">Available Roster</h4>
+                                   </div>
+                                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                                       {state.adventurers.filter(a => !selectedAdvIds.includes(a.id)).map(adv => {
+                                           const isBusy = state.activeRuns.some(r => r.adventurerIds.includes(adv.id));
+                                           if (isBusy) return null;
+                                           const isFull = selectedAdvIds.length >= 3;
+
+                                           return (
+                                               <button 
+                                                    key={adv.id}
+                                                    onClick={() => addToParty(adv.id)}
+                                                    disabled={isFull}
+                                                    className={`
+                                                        w-full flex justify-between items-center p-2 rounded border transition-all group
+                                                        ${isFull 
+                                                            ? 'bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed opacity-60' 
+                                                            : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-slate-500'
+                                                        }
+                                                    `}
+                                               >
+                                                   <div className="flex items-center gap-2">
+                                                       <div className="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-green-400 transition-colors"></div>
+                                                       <span className="text-sm">{adv.name}</span>
+                                                   </div>
+                                                   <div className="flex items-center gap-2">
+                                                       <span className="text-xs font-mono text-slate-500 group-hover:text-slate-300">{calculateAdventurerPower(adv, state)} Pwr</span>
+                                                       <Plus size={14} className={isFull ? 'hidden' : 'text-slate-600 group-hover:text-green-400 transition-colors'}/>
+                                                   </div>
+                                               </button>
+                                           )
+                                       })}
+                                       {state.adventurers.filter(a => !selectedAdvIds.includes(a.id) && !state.activeRuns.some(r => r.adventurerIds.includes(a.id))).length === 0 && (
+                                           <div className="text-xs text-slate-500 italic text-center py-6">
+                                               No available contractors.
+                                           </div>
+                                       )}
+                                   </div>
+                               </div>
+                           </div>
+
+                           {/* Prediction & Actions */}
+                           <div className={`flex flex-col xl:flex-row items-center justify-between p-4 rounded-lg border gap-4 transition-colors ${isOverpowered ? 'bg-red-950/20 border-red-900/50' : 'bg-slate-950 border-slate-800'}`}>
+                               
+                               <div className="flex flex-col gap-2 w-full xl:w-auto">
+                                   <div className="text-sm flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+                                       <div>
+                                           <span className="text-slate-500 block text-xs uppercase tracking-wider">Party DPS</span>
+                                           <span className="text-white font-mono text-lg">{formatNumber(currentPartyDps)}</span>
+                                       </div>
+                                       <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+                                       <div>
+                                           <span className="text-slate-500 block text-xs uppercase tracking-wider">Est. Kills</span>
+                                           <span className={`font-bold text-lg ${estimatedKills > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                               {estimatedKills} <span className="text-sm font-normal text-slate-500">/ Run</span>
+                                           </span>
+                                       </div>
+                                       <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+                                       <div className="text-xs text-slate-400">
+                                           <div>Est. Gold: <span className={`${isOverpowered ? 'text-red-400' : 'text-yellow-400'}`}>~{formatNumber(totalEstGold)}</span></div>
+                                           <div>Est. XP: <span className={`${isOverpowered ? 'text-red-400' : 'text-blue-400'}`}>~{formatNumber(totalEstXp)}</span></div>
+                                       </div>
+                                   </div>
+
+                                   {isOverpowered && (
+                                       <div className="flex items-center gap-2 text-[10px] text-red-400 font-bold bg-red-900/20 px-2 py-1 rounded border border-red-900/30">
+                                           <AlertTriangle size={12} />
+                                           <span>Team Overpowered! Rewards reduced (Min Gold, 10% XP). Use weaker contractors.</span>
+                                       </div>
+                                   )}
+                                   
+                                   {!meetsPowerRequirement && selectedAdvIds.length > 0 && (
+                                       <div className="flex items-center gap-2 text-[10px] text-amber-400 font-bold bg-amber-900/20 px-2 py-1 rounded border border-amber-900/30">
+                                           <AlertTriangle size={12} />
+                                           <span>Insufficient Power! Recommended: {dungeon.recommendedPower}</span>
+                                       </div>
+                                   )}
+                               </div>
+
+                               {/* Action Buttons */}
+                               <div className="flex items-center gap-3 w-full xl:w-auto flex-wrap sm:flex-nowrap">
+                                   
+                                   {/* Auto-Repeat Toggle (Replaces 1x-5x) */}
+                                   <button
+                                        onClick={() => setIsAutoRepeat(!isAutoRepeat)}
+                                        className={`
+                                            flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-bold transition-all
+                                            ${isAutoRepeat 
+                                                ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-900/20' 
+                                                : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-slate-300'
+                                            }
+                                        `}
+                                   >
+                                       <Repeat size={16} className={isAutoRepeat ? 'animate-spin-slow' : ''} />
+                                       <span>{isAutoRepeat ? 'Auto-Repeat ON' : 'Single Run'}</span>
+                                   </button>
+
+                                   {/* Start Button */}
+                                   <button
+                                        onClick={() => {
+                                            startDungeon(dungeon.id, selectedAdvIds, isAutoRepeat);
+                                            cancelConfiguration();
+                                        }}
+                                        disabled={selectedAdvIds.length === 0 || isPartyBusy || !meetsPowerRequirement}
+                                        className={`
+                                            flex-1 xl:flex-none text-white text-sm font-bold px-6 py-3 rounded-lg transition-colors shadow-lg flex items-center justify-center gap-2 whitespace-nowrap
+                                            ${selectedAdvIds.length === 0 || isPartyBusy || !meetsPowerRequirement
+                                                ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none' 
+                                                : isAutoRepeat 
+                                                    ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/20 ring-2 ring-indigo-500/50'
+                                                    : 'bg-green-600 hover:bg-green-500 shadow-green-900/20'
+                                            }
+                                        `}
+                                   >
+                                       {isPartyBusy ? (
+                                           <>
+                                            <AlertTriangle size={16} />
+                                            <span>Busy</span>
+                                           </>
+                                       ) : !meetsPowerRequirement ? (
+                                            selectedAdvIds.length === 0 ? (
+                                                <>
+                                                 <Users size={16} />
+                                                 <span>Assign Team</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                 <AlertTriangle size={16} />
+                                                 <span>Need {dungeon.recommendedPower} Power</span>
+                                                </>
+                                            )
+                                       ) : (
+                                           <>
+                                            {isAutoRepeat ? <Repeat size={16} /> : <Power size={16} />}
+                                            <span>{isAutoRepeat ? 'Start Loop' : 'Start Contract'}</span>
+                                           </>
+                                       )}
+                                   </button>
+                               </div>
+                           </div>
+                       </div>
+                   )}
+               </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
