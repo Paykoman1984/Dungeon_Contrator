@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Item, ItemType, Rarity, Adventurer } from '../types';
-import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual, calculateItemRating } from '../utils/gameMath';
+import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual, calculateItemRating, calculateConservativePower } from '../utils/gameMath';
 import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight } from 'lucide-react';
 import { RARITY_COLORS, MAX_STATS_BY_RARITY, ADVENTURER_RARITY_MULTIPLIERS, STAT_TIER_COLORS } from '../constants';
 import { ItemIcon } from './ItemIcon';
@@ -52,7 +52,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
             }
             const checkItem = liveItem || item;
 
-            // Check if slot was modified or items differ
+            // Check if slot was modified directly (touched) or if content differs
             const isModified = run.modifiedSlots?.[holder.id]?.includes(slotType);
             if (isModified || !areItemsEqual(checkItem, snapshotItem)) {
                 isPending = true;
@@ -261,7 +261,7 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                                 {advBusy && advPending && <RefreshCw size={12} className="text-amber-500" />}
                                                             </span>
                                                             <span className="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono">
-                                                                {calculateAdventurerPower(adv, state)} PWR
+                                                                {calculateConservativePower(adv, state)} PWR
                                                             </span>
                                                         </div>
 

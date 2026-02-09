@@ -13,6 +13,12 @@ export enum ItemType {
   TRINKET = 'Trinket',
 }
 
+export enum ContractType {
+    DUNGEON = 'Dungeon',
+    GATHERING = 'Gathering',
+    FISHING = 'Fishing'
+}
+
 export enum WeaponType {
   SWORD = 'Sword',
   BLUNT = 'Blunt', // Mace, Hammer
@@ -36,6 +42,32 @@ export interface Skill {
   unlockLevel: number;
 }
 
+// --- NEW HYBRID SYSTEM TYPES ---
+
+export interface AdventurerTrait {
+    id: string;
+    name: string;
+    description: string;
+    effect: (stats: any, state: any) => void; // Mutates stats object
+}
+
+export interface SkillNode {
+    id: string;
+    name: string;
+    description: string;
+    icon: string; // Icon name for Lucide
+    x: number; // For visual layout (grid col)
+    y: number; // For visual layout (grid row)
+    requires: string[]; // IDs of prerequisite nodes
+    maxLevel: number; // Usually 1 for small trees
+    cost: number;
+    effectType: 'STAT' | 'ECONOMY' | 'SPEED';
+    effectValue: number; // e.g., 0.10 for 10%
+    statTarget?: string; // 'damage', 'health', 'gold', etc.
+}
+
+// -------------------------------
+
 export interface ItemStat {
   name: string;
   value: number;
@@ -55,6 +87,14 @@ export interface Item {
   value: number; 
 }
 
+export interface Material {
+    id: string;
+    name: string;
+    rarity: Rarity;
+    description: string;
+    value: number;
+}
+
 export interface Adventurer {
   id: string;
   name: string;
@@ -63,6 +103,17 @@ export interface Adventurer {
   level: number;
   xp: number;
   xpToNextLevel: number;
+  
+  // Proficiency XP
+  gatheringXp: number;
+  fishingXp: number;
+
+  // Hybrid System Fields
+  traitId: string; // The permanent archetype
+  skillPoints: number; // Available points
+  unlockedSkills: string[]; // IDs of unlocked nodes from their Role tree
+  skillTree: SkillNode[]; // New: Unique tree for this adventurer
+
   slots: {
     [ItemType.WEAPON]: Item | null;
     [ItemType.ARMOR]: Item | null;
@@ -89,12 +140,14 @@ export interface Enemy {
 export interface Dungeon {
   id: string;
   name: string;
+  type: ContractType; // New Field
   level: number;
   description: string;
   durationSeconds: number;
-  enemyId: string; 
-  dropChance: number;
+  enemyId: string; // Used for visuals/difficulty scaling even in gathering
+  dropChance: number; // For gathering: Material yield chance/multiplier
   recommendedPower: number;
+  lootTable?: string[]; // IDs of materials that can drop
 }
 
 export interface RunSnapshot {
@@ -152,6 +205,7 @@ export interface DungeonReport {
   goldEarned: number;
   xpEarned: number;
   itemsFound: Item[];
+  materialsFound: Record<string, number>; // New field for mats
   timestamp: number;
 }
 
@@ -160,6 +214,7 @@ export interface GameState {
   prestigeCurrency: number;
   adventurers: Adventurer[];
   inventory: Item[];
+  materials: Record<string, number>; // New field: Material ID -> Quantity
   activeRuns: ActiveRun[];
   unlockedDungeons: string[]; 
   upgrades: { [id: string]: number }; 

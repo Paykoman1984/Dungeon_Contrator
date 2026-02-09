@@ -9,6 +9,7 @@ import { PrestigePanel } from './components/PrestigePanel';
 import { DungeonResultModal } from './components/DungeonResultModal';
 import { SaveLoadModal } from './components/SaveLoadModal';
 import { formatNumber, calculateConservativePower } from './utils/gameMath';
+import { INVENTORY_SIZE } from './constants';
 import { LayoutDashboard, Users, Swords, Package, Landmark, Settings, Crown } from 'lucide-react';
 
 const AppContent: React.FC = () => {
@@ -55,7 +56,7 @@ const AppContent: React.FC = () => {
             onClick={() => setView('INVENTORY')} 
             icon={<Package size={20} />} 
             label="Inventory/Craft" 
-            badge={state.inventory.length >= 20 ? 'FULL' : undefined}
+            badge={state.inventory.length >= INVENTORY_SIZE ? 'FULL' : undefined}
           />
           <SidebarItem 
             active={view === 'GUILD'} 

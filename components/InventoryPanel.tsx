@@ -3,8 +3,8 @@ import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Item, ItemType, Rarity } from '../types';
 import { formatNumber } from '../utils/gameMath';
-import { Trash2, X, CheckSquare } from 'lucide-react';
-import { RARITY_COLORS, RARITY_BG_COLORS, INVENTORY_SIZE } from '../constants';
+import { Trash2, X, CheckSquare, Layers, Box, CheckCircle } from 'lucide-react';
+import { RARITY_COLORS, RARITY_BG_COLORS, INVENTORY_SIZE, MATERIALS } from '../constants';
 import { ItemIcon } from './ItemIcon';
 import { ItemDetailsModal } from './ItemDetailsModal';
 
@@ -31,6 +31,14 @@ export const InventoryPanel: React.FC = () => {
       }
   };
 
+  const handleSelectAll = () => {
+      if (selectedBulkIds.length === state.inventory.length && state.inventory.length > 0) {
+          setSelectedBulkIds([]);
+      } else {
+          setSelectedBulkIds(state.inventory.map(i => i.id));
+      }
+  };
+
   const executeBulkSalvage = () => {
       if (selectedBulkIds.length > 0) {
           salvageManyItems(selectedBulkIds);
@@ -41,6 +49,9 @@ export const InventoryPanel: React.FC = () => {
   const bulkTotalValue = state.inventory
     .filter(i => selectedBulkIds.includes(i.id))
     .reduce((sum, i) => sum + i.value, 0);
+
+  // Cast Object.entries to ensure value is typed as number, not unknown
+  const materialsList = (Object.entries(state.materials) as [string, number][]).filter(([_, count]) => count > 0);
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto pb-20">
@@ -62,19 +73,31 @@ export const InventoryPanel: React.FC = () => {
                  </span>
              </h2>
 
-             <button 
-                onClick={toggleBulkMode}
-                className={`
-                    flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border
-                    ${isBulkMode 
-                        ? 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700' 
-                        : 'bg-red-900/20 text-red-300 border-red-900/30 hover:bg-red-900/30'
-                    }
-                `}
-             >
-                 {isBulkMode ? <X size={14} /> : <Trash2 size={14} />}
-                 {isBulkMode ? 'Cancel Bulk' : 'Bulk Salvage'}
-             </button>
+             <div className="flex items-center gap-2">
+                 {isBulkMode && (
+                     <button
+                        onClick={handleSelectAll}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded text-xs font-bold transition-all border bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700 hover:text-white"
+                     >
+                        <CheckCircle size={14} />
+                        {selectedBulkIds.length === state.inventory.length && state.inventory.length > 0 ? 'Deselect All' : 'Select All'}
+                     </button>
+                 )}
+
+                 <button 
+                    onClick={toggleBulkMode}
+                    className={`
+                        flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all border
+                        ${isBulkMode 
+                            ? 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700' 
+                            : 'bg-red-900/20 text-red-300 border-red-900/30 hover:bg-red-900/30'
+                        }
+                    `}
+                 >
+                     {isBulkMode ? <X size={14} /> : <Trash2 size={14} />}
+                     {isBulkMode ? 'Cancel' : 'Bulk Salvage'}
+                 </button>
+             </div>
          </div>
          
          <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2">
@@ -128,7 +151,38 @@ export const InventoryPanel: React.FC = () => {
          </div>
       </div>
 
-      {/* 2. Bulk Action Panel */}
+      {/* 2. Materials Section (New) */}
+      <div className="bg-slate-900/30 p-4 rounded-xl border border-slate-800/50">
+          <h2 className="text-lg font-bold text-slate-200 mb-4 flex items-center gap-2">
+              <Layers size={18} className="text-indigo-400"/> Materials Storage
+          </h2>
+          
+          {materialsList.length === 0 ? (
+              <div className="text-slate-500 text-sm italic text-center py-6 border border-dashed border-slate-800 rounded">
+                  No materials collected. Complete Gathering or Fishing contracts.
+              </div>
+          ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                  {materialsList.map(([matId, count]) => {
+                      const mat = MATERIALS[matId];
+                      if (!mat) return null;
+                      return (
+                          <div key={matId} className="bg-slate-900 border border-slate-700 p-2 rounded flex items-center gap-3 shadow-sm">
+                               <div className={`w-8 h-8 rounded flex items-center justify-center bg-slate-800 ${RARITY_COLORS[mat.rarity]}`}>
+                                   <Box size={16} />
+                               </div>
+                               <div>
+                                   <div className={`text-xs font-bold ${RARITY_COLORS[mat.rarity]}`}>{mat.name}</div>
+                                   <div className="text-sm font-mono text-slate-300">x{formatNumber(count)}</div>
+                               </div>
+                          </div>
+                      );
+                  })}
+              </div>
+          )}
+      </div>
+
+      {/* 3. Bulk Action Panel */}
       {isBulkMode && (
          <div className="bg-slate-900 border border-red-900/30 rounded-xl p-5 shadow-2xl animate-in slide-in-from-top-2 duration-200">
              <div className="flex flex-col sm:flex-row justify-between items-center gap-4">

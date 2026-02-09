@@ -1,15 +1,17 @@
 
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
-import { DUNGEONS, ENEMIES } from '../constants';
-import { calculateAdventurerPower, calculateDungeonDuration, calculatePartyDps, formatNumber } from '../utils/gameMath';
-import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords } from 'lucide-react';
+import { DUNGEONS, ENEMIES, MATERIALS } from '../constants';
+import { calculateAdventurerPower, calculateConservativePower, calculateDungeonDuration, calculatePartyDps, formatNumber } from '../utils/gameMath';
+import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Fish } from 'lucide-react';
+import { ContractType } from '../types';
 
 export const DungeonList: React.FC = () => {
   const { state, startDungeon, cancelDungeon, stopRepeat } = useGame();
   const [configuringDungeon, setConfiguringDungeon] = useState<string | null>(null);
   const [selectedAdvIds, setSelectedAdvIds] = useState<string[]>([]);
   const [isAutoRepeat, setIsAutoRepeat] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<ContractType>(ContractType.DUNGEON);
 
   const addToParty = (id: string) => {
       if (selectedAdvIds.length >= 3) return; // Limit party size to 3
@@ -55,10 +57,35 @@ export const DungeonList: React.FC = () => {
       setIsAutoRepeat(false);
   };
 
+  const filteredDungeons = DUNGEONS.filter(d => d.type === activeTab);
+
   return (
     <div className="space-y-6">
+      
+      {/* Tabs */}
+      <div className="flex space-x-2 border-b border-slate-800 pb-1">
+          <button
+            onClick={() => { setActiveTab(ContractType.DUNGEON); cancelConfiguration(); }}
+            className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.DUNGEON ? 'bg-slate-800 text-slate-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+              <Swords size={16} /> Combat
+          </button>
+          <button
+            onClick={() => { setActiveTab(ContractType.GATHERING); cancelConfiguration(); }}
+            className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.GATHERING ? 'bg-slate-800 text-emerald-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-emerald-400'}`}
+          >
+              <Leaf size={16} /> Gathering
+          </button>
+          <button
+            onClick={() => { setActiveTab(ContractType.FISHING); cancelConfiguration(); }}
+            className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.FISHING ? 'bg-slate-800 text-blue-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-blue-400'}`}
+          >
+              <Anchor size={16} /> Fishing
+          </button>
+      </div>
+
       <div className="grid gap-4">
-        {DUNGEONS.map(dungeon => {
+        {filteredDungeons.map(dungeon => {
           // Get ALL active runs for this dungeon
           const dungeonRuns = state.activeRuns.filter(r => r.dungeonId === dungeon.id);
           const isConfiguring = configuringDungeon === dungeon.id;
@@ -71,19 +98,27 @@ export const DungeonList: React.FC = () => {
               const adv = state.adventurers.find(a => a.id === id);
               return sum + (adv ? calculateAdventurerPower(adv, state) : 0);
           }, 0);
-
-          const estimatedKills = Math.floor((currentPartyDps * duration) / enemy.hp);
           
-          // Overpowered check
+          const isCombat = dungeon.type === ContractType.DUNGEON;
+
+          // Estimate Kills / Yield
+          let estimatedKills = Math.floor((currentPartyDps * duration) / enemy.hp);
+          if (!isCombat) {
+              // For gathering, pretend 1 cycle per 2 "kills" worth of DPS to normalize
+              estimatedKills = Math.max(1, Math.floor(estimatedKills / 2));
+          }
+          
+          // Overpowered check (Diminishing Returns)
           const isOverpowered = currentPartyPower > (dungeon.recommendedPower * 3);
           // Requirement check
           const meetsPowerRequirement = currentPartyPower >= dungeon.recommendedPower;
+          const lowPower = !isCombat && !meetsPowerRequirement; // Gathering allows low power but penalizes
 
           // Estimate Averages for display
           let avgGold = (enemy.goldMin + enemy.goldMax) / 2;
           let avgXp = (enemy.xpMin + enemy.xpMax) / 2;
           
-          if (isOverpowered) {
+          if (isCombat && isOverpowered) {
               avgGold = enemy.goldMin;
               avgXp = avgXp * 0.10;
           }
@@ -109,17 +144,31 @@ export const DungeonList: React.FC = () => {
                             
                             <div className="flex flex-wrap gap-4 mt-2 text-xs text-slate-500">
                                 <span className="flex items-center gap-1"><Timer size={12}/> {duration.toFixed(0)}s</span>
-                                <span className="flex items-center gap-1 text-red-300"><Skull size={12}/> {enemy.name} ({formatNumber(enemy.hp)} HP)</span>
-                                <span className="flex items-center gap-1 text-orange-300 border border-orange-900/50 bg-orange-900/20 px-1.5 py-0.5 rounded">
-                                    <Swords size={12}/> Rec. {dungeon.recommendedPower} Power
+                                {isCombat ? (
+                                    <span className="flex items-center gap-1 text-red-300"><Skull size={12}/> {enemy.name} ({formatNumber(enemy.hp)} HP)</span>
+                                ) : (
+                                    <span className="flex items-center gap-1 text-slate-400"><AlertTriangle size={12}/> Difficulty: {dungeon.recommendedPower}</span>
+                                )}
+                                <span className={`flex items-center gap-1 border px-1.5 py-0.5 rounded ${isCombat ? 'text-orange-300 border-orange-900/50 bg-orange-900/20' : 'text-emerald-300 border-emerald-900/50 bg-emerald-900/20'}`}>
+                                    {isCombat ? <Swords size={12}/> : <Leaf size={12} />} 
+                                    {isCombat ? 'Rec.' : 'Req.'} {dungeon.recommendedPower} Power
                                 </span>
                             </div>
                             
                             {/* Reward Info */}
                             <div className="flex gap-3 mt-1 text-[10px] text-slate-600">
-                                <span>Rewards/Kill:</span>
-                                <span className="text-yellow-600">{enemy.goldMin}-{enemy.goldMax} Gold</span>
-                                <span className="text-blue-600">{enemy.xpMin}-{enemy.xpMax} XP</span>
+                                <span>Rewards:</span>
+                                {isCombat ? (
+                                    <>
+                                        <span className="text-yellow-600">{enemy.goldMin}-{enemy.goldMax} Gold</span>
+                                        <span className="text-blue-600">{enemy.xpMin}-{enemy.xpMax} XP</span>
+                                    </>
+                                ) : (
+                                    dungeon.lootTable?.map(mid => {
+                                        const mat = MATERIALS[mid];
+                                        return <span key={mid} className="text-slate-400">{mat?.name}</span>
+                                    })
+                                )}
                             </div>
                         </div>
 
@@ -158,7 +207,8 @@ export const DungeonList: React.FC = () => {
                                    
                                    // Real-time projected kills for this run (visual only)
                                    const runDps = calculatePartyDps(run.adventurerIds, state);
-                                   const runEstKills = Math.floor((runDps * (run.duration/1000)) / enemy.hp);
+                                   let runEstKills = Math.floor((runDps * (run.duration/1000)) / enemy.hp);
+                                   if(!isCombat) runEstKills = Math.max(1, Math.floor(runEstKills/2));
 
                                    return (
                                        <div key={run.id} className="bg-slate-900/50 rounded p-2 border border-slate-700/50 flex items-center gap-3 relative overflow-hidden group/run">
@@ -170,12 +220,14 @@ export const DungeonList: React.FC = () => {
                                            <div className="flex-1 min-w-0">
                                                <div className="flex items-center gap-2 text-sm text-slate-300">
                                                    <Users size={12} className="text-indigo-400"/>
-                                                   <span className="truncate">{activeAdventurers.map(a => a.name).join(', ')}</span>
+                                                   <span className="truncate">
+                                                       {activeAdventurers.map(a => `${a.name} (Lvl ${a.level}, ${formatNumber(calculateConservativePower(a, state))} Pwr)`).join(', ')}
+                                                   </span>
                                                </div>
                                                <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
-                                                   <Swords size={10} /> {formatNumber(runDps)} DPS
+                                                   <Swords size={10} /> Total: {formatNumber(runDps)} Atk Pwr
                                                    <span className="text-slate-700">|</span>
-                                                   <Skull size={10} /> ~{runEstKills} Kills/Run
+                                                   {isCombat ? <Skull size={10} /> : <Leaf size={10} />} ~{runEstKills} {isCombat ? 'Kills' : 'Yield'}/Run
                                                </div>
                                            </div>
                                            
@@ -265,6 +317,7 @@ export const DungeonList: React.FC = () => {
                                                        <div className="flex items-center gap-2">
                                                             <div className={`w-1.5 h-1.5 rounded-full ${isBusy ? 'bg-amber-800' : 'bg-indigo-500'}`}></div>
                                                             <span className="text-sm font-medium">{adv.name}</span>
+                                                            <span className="text-xs text-slate-500">Lvl {adv.level}</span>
                                                        </div>
                                                        <div className="flex items-center gap-3">
                                                            {isBusy && <span className="text-[10px] uppercase font-bold text-amber-500">Busy</span>}
@@ -305,6 +358,7 @@ export const DungeonList: React.FC = () => {
                                                    <div className="flex items-center gap-2">
                                                        <div className="w-1.5 h-1.5 rounded-full bg-slate-600 group-hover:bg-green-400 transition-colors"></div>
                                                        <span className="text-sm">{adv.name}</span>
+                                                       <span className="text-xs text-slate-500">Lvl {adv.level}</span>
                                                    </div>
                                                    <div className="flex items-center gap-2">
                                                        <span className="text-xs font-mono text-slate-500 group-hover:text-slate-300">{calculateAdventurerPower(adv, state)} Pwr</span>
@@ -328,35 +382,44 @@ export const DungeonList: React.FC = () => {
                                <div className="flex flex-col gap-2 w-full xl:w-auto">
                                    <div className="text-sm flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
                                        <div>
-                                           <span className="text-slate-500 block text-xs uppercase tracking-wider">Party DPS</span>
-                                           <span className="text-white font-mono text-lg">{formatNumber(currentPartyDps)}</span>
+                                           <span className="text-slate-500 block text-xs uppercase tracking-wider">Party Power</span>
+                                           <span className="text-white font-mono text-lg">{formatNumber(currentPartyPower)}</span>
                                        </div>
                                        <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
                                        <div>
-                                           <span className="text-slate-500 block text-xs uppercase tracking-wider">Est. Kills</span>
+                                           <span className="text-slate-500 block text-xs uppercase tracking-wider">{isCombat ? 'Est. Kills' : 'Est. Yield'}</span>
                                            <span className={`font-bold text-lg ${estimatedKills > 0 ? 'text-green-400' : 'text-red-400'}`}>
                                                {estimatedKills} <span className="text-sm font-normal text-slate-500">/ Run</span>
                                            </span>
                                        </div>
                                        <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
-                                       <div className="text-xs text-slate-400">
-                                           <div>Est. Gold: <span className={`${isOverpowered ? 'text-red-400' : 'text-yellow-400'}`}>~{formatNumber(totalEstGold)}</span></div>
-                                           <div>Est. XP: <span className={`${isOverpowered ? 'text-red-400' : 'text-blue-400'}`}>~{formatNumber(totalEstXp)}</span></div>
-                                       </div>
+                                       {isCombat && (
+                                            <div className="text-xs text-slate-400">
+                                                <div>Est. Gold: <span className={`${isOverpowered ? 'text-red-400' : 'text-yellow-400'}`}>~{formatNumber(totalEstGold)}</span></div>
+                                                <div>Est. XP: <span className={`${isOverpowered ? 'text-red-400' : 'text-blue-400'}`}>~{formatNumber(totalEstXp)}</span></div>
+                                            </div>
+                                       )}
                                    </div>
 
-                                   {isOverpowered && (
+                                   {isCombat && isOverpowered && (
                                        <div className="flex items-center gap-2 text-[10px] text-red-400 font-bold bg-red-900/20 px-2 py-1 rounded border border-red-900/30">
                                            <AlertTriangle size={12} />
                                            <span>Team Overpowered! Rewards reduced (Min Gold, 10% XP). Use weaker contractors.</span>
                                        </div>
                                    )}
                                    
-                                   {!meetsPowerRequirement && selectedAdvIds.length > 0 && (
+                                   {isCombat && !meetsPowerRequirement && selectedAdvIds.length > 0 && (
                                        <div className="flex items-center gap-2 text-[10px] text-amber-400 font-bold bg-amber-900/20 px-2 py-1 rounded border border-amber-900/30">
                                            <AlertTriangle size={12} />
                                            <span>Insufficient Power! Recommended: {dungeon.recommendedPower}</span>
                                        </div>
+                                   )}
+                                   
+                                   {!isCombat && lowPower && selectedAdvIds.length > 0 && (
+                                        <div className="flex items-center gap-2 text-[10px] text-amber-400 font-bold bg-amber-900/20 px-2 py-1 rounded border border-amber-900/30">
+                                            <AlertTriangle size={12} />
+                                            <span>Power too low! Yield reduced by 50%.</span>
+                                        </div>
                                    )}
                                </div>
 
@@ -375,7 +438,7 @@ export const DungeonList: React.FC = () => {
                                         `}
                                    >
                                        <Repeat size={16} className={isAutoRepeat ? 'animate-spin-slow' : ''} />
-                                       <span>{isAutoRepeat ? 'Auto-Repeat ON' : 'Single Run'}</span>
+                                       <span>{isAutoRepeat ? 'Looping' : 'Single'}</span>
                                    </button>
 
                                    {/* Start Button */}
@@ -384,10 +447,10 @@ export const DungeonList: React.FC = () => {
                                             startDungeon(dungeon.id, selectedAdvIds, isAutoRepeat);
                                             cancelConfiguration();
                                         }}
-                                        disabled={selectedAdvIds.length === 0 || isPartyBusy || !meetsPowerRequirement}
+                                        disabled={selectedAdvIds.length === 0 || isPartyBusy || (isCombat && !meetsPowerRequirement)}
                                         className={`
                                             flex-1 xl:flex-none text-white text-sm font-bold px-6 py-3 rounded-lg transition-colors shadow-lg flex items-center justify-center gap-2 whitespace-nowrap
-                                            ${selectedAdvIds.length === 0 || isPartyBusy || !meetsPowerRequirement
+                                            ${selectedAdvIds.length === 0 || isPartyBusy || (isCombat && !meetsPowerRequirement)
                                                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed shadow-none' 
                                                 : isAutoRepeat 
                                                     ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/20 ring-2 ring-indigo-500/50'
@@ -400,7 +463,7 @@ export const DungeonList: React.FC = () => {
                                             <AlertTriangle size={16} />
                                             <span>Busy</span>
                                            </>
-                                       ) : !meetsPowerRequirement ? (
+                                       ) : (isCombat && !meetsPowerRequirement) ? (
                                             selectedAdvIds.length === 0 ? (
                                                 <>
                                                  <Users size={16} />
@@ -415,7 +478,7 @@ export const DungeonList: React.FC = () => {
                                        ) : (
                                            <>
                                             {isAutoRepeat ? <Repeat size={16} /> : <Power size={16} />}
-                                            <span>{isAutoRepeat ? 'Start Loop' : 'Start Contract'}</span>
+                                            <span>Start {activeTab === ContractType.DUNGEON ? 'Contract' : 'Job'}</span>
                                            </>
                                        )}
                                    </button>

@@ -1,8 +1,8 @@
 
 import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
-import { GameState, Item, Adventurer, Dungeon, ActiveRun, ItemType, DungeonReport, AdventurerRole, Rarity, RunSnapshot } from '../types';
-import { DUNGEONS, INITIAL_GOLD, UPGRADES, INVENTORY_SIZE, ROLE_CONFIG, ENEMIES, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_RARITY_MULTIPLIERS, TIER_MULTIPLIERS } from '../constants';
-import { calculateAdventurerPower, calculateDungeonDuration, generateItem, generateAdventurer, calculatePartyDps, calculatePartyStat, calculatePrestigeGain, generateRandomAffix, rollStatTier, ITEM_RARITY_MULTIPLIERS, calculateItemUpgradeCost, calculateRunSnapshot } from '../utils/gameMath';
+import { GameState, Item, Adventurer, Dungeon, ActiveRun, ItemType, DungeonReport, AdventurerRole, Rarity, RunSnapshot, ContractType } from '../types';
+import { DUNGEONS, INITIAL_GOLD, UPGRADES, INVENTORY_SIZE, ROLE_CONFIG, ENEMIES, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_RARITY_MULTIPLIERS, TIER_MULTIPLIERS, MATERIALS, ADVENTURER_TRAITS } from '../constants';
+import { calculateAdventurerPower, calculateDungeonDuration, generateItem, generateAdventurer, calculatePartyDps, calculatePartyStat, calculatePrestigeGain, generateRandomAffix, rollStatTier, ITEM_RARITY_MULTIPLIERS, calculateItemUpgradeCost, calculateRunSnapshot, calculateTotalSkillPoints, generateSkillTree } from '../utils/gameMath';
 
 const STORAGE_KEY = 'idle_dungeon_contractor_save_v1';
 
@@ -22,6 +22,7 @@ const initialState: GameState = {
   prestigeCurrency: 0,
   adventurers: [initialAdventurer],
   inventory: [],
+  materials: {}, // New field
   activeRuns: [],
   unlockedDungeons: ['rat_cellar'],
   upgrades: {},
@@ -54,7 +55,8 @@ type Action =
   | { type: 'PRESTIGE'; payload: { currencyAwarded: number } }
   | { type: 'BUY_PRESTIGE_UPGRADE'; payload: { upgradeId: string; cost: number } }
   | { type: 'ENCHANT_ITEM'; payload: { itemId: string } }
-  | { type: 'REROLL_STAT'; payload: { itemId: string; statIndex: number } };
+  | { type: 'REROLL_STAT'; payload: { itemId: string; statIndex: number } }
+  | { type: 'UNLOCK_SKILL'; payload: { adventurerId: string; skillId: string } };
 
 const gameReducer = (state: GameState, action: Action): GameState => {
   switch (action.type) {
@@ -64,6 +66,33 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 
     case 'IMPORT_SAVE': {
         const imported = action.payload;
+        // Ensure new fields exist on imported saves
+        if(!imported.materials) imported.materials = {};
+        if(imported.adventurers) {
+            imported.adventurers = imported.adventurers.map(a => {
+                 // Hybrid System Migration
+                 if (!a.traitId) {
+                     const trait = ADVENTURER_TRAITS[Math.floor(Math.random() * ADVENTURER_TRAITS.length)];
+                     a.traitId = trait.id;
+                 }
+                 if (a.skillPoints === undefined) {
+                     // Recalculate skill points based on level
+                     a.skillPoints = calculateTotalSkillPoints(a.level);
+                 }
+                 if (!a.unlockedSkills) {
+                     a.unlockedSkills = [];
+                 }
+                 if (!a.skillTree) {
+                     a.skillTree = generateSkillTree(a.role);
+                 }
+
+                 return {
+                    ...a,
+                    gatheringXp: a.gatheringXp || 0,
+                    fishingXp: a.fishingXp || 0
+                 };
+            });
+        }
         return {
             ...initialState,
             ...imported,
@@ -155,93 +184,160 @@ const gameReducer = (state: GameState, action: Action): GameState => {
 
       let newGold = state.gold;
       let newInventory = [...state.inventory];
+      let newMaterials = { ...state.materials }; // Copy materials
       let newStats = { ...state.statistics };
       let newAdventurers = [...state.adventurers];
       let goldGain = 0;
       let xpGain = 0;
       let droppedItems: Item[] = [];
+      let foundMaterials: Record<string, number> = {};
 
       // Use Snapshot for Calculations
       const snapshot = run.snapshot || calculateRunSnapshot(run.adventurerIds, state); 
+      
+      const isCombat = dungeon.type === ContractType.DUNGEON;
 
       if (success && kills > 0) {
-        let rawGold = 0;
-        let rawXp = 0;
+        
+        // --- 1. COMBAT REWARDS (GOLD/GEAR/XP) ---
+        if (isCombat) {
+            let rawGold = 0;
+            let rawXp = 0;
 
-        const isOverpowered = snapshot.power > (dungeon.recommendedPower * 3);
+            const isOverpowered = snapshot.power > (dungeon.recommendedPower * 3);
 
-        if (isOverpowered) {
-            rawGold = kills * enemy.goldMin;
-            if (kills > 500) {
-                 const avgXp = ((enemy.xpMin + enemy.xpMax) / 2);
-                 rawXp = (kills * avgXp) * 0.10;
-            } else {
-                 for(let i=0; i<kills; i++) {
-                     const xpRoll = Math.floor(enemy.xpMin + Math.random() * (enemy.xpMax - enemy.xpMin + 1));
-                     rawXp += xpRoll;
-                 }
-                 rawXp = Math.floor(rawXp * 0.10);
-            }
-        } else {
-            if (kills > 500) {
-                rawGold = kills * ((enemy.goldMin + enemy.goldMax) / 2);
-                rawXp = kills * ((enemy.xpMin + enemy.xpMax) / 2);
-            } else {
-                for(let i=0; i<kills; i++) {
-                    rawGold += Math.floor(enemy.goldMin + Math.random() * (enemy.goldMax - enemy.goldMin + 1));
-                    rawXp += Math.floor(enemy.xpMin + Math.random() * (enemy.xpMax - enemy.xpMin + 1));
+            if (isOverpowered) {
+                rawGold = kills * enemy.goldMin;
+                if (kills > 500) {
+                     const avgXp = ((enemy.xpMin + enemy.xpMax) / 2);
+                     rawXp = (kills * avgXp) * 0.10;
+                } else {
+                     for(let i=0; i<kills; i++) {
+                         const xpRoll = Math.floor(enemy.xpMin + Math.random() * (enemy.xpMax - enemy.xpMin + 1));
+                         rawXp += xpRoll;
+                     }
+                     rawXp = Math.floor(rawXp * 0.10);
                 }
-            }
-        }
-        
-        goldGain = Math.floor(rawGold * (1 + snapshot.goldBonus));
-        xpGain = Math.floor(rawXp * (1 + snapshot.xpBonus));
-
-        newGold += goldGain;
-        newStats.totalGoldEarned += goldGain;
-        newStats.dungeonsCleared += 1;
-        newStats.monstersKilled += kills;
-
-        // Loot Logic
-        const baseDropChance = dungeon.dropChance + snapshot.lootBonus;
-        
-        const extraRolls = Math.floor(kills / 10);
-        const totalRolls = 1 + extraRolls;
-
-        for (let i = 0; i < totalRolls; i++) {
-             if (Math.random() < baseDropChance) {
-                if (newInventory.length < INVENTORY_SIZE) {
-                    const newItem = generateItem(dungeon.level, state.prestigeUpgrades);
-                    newInventory.push(newItem);
-                    droppedItems.push(newItem);
-
-                    // Secondary drop logic (3% chance)
-                    if (newInventory.length < INVENTORY_SIZE && Math.random() < 0.03) {
-                         const bonusItem = generateItem(dungeon.level, state.prestigeUpgrades);
-                         newInventory.push(bonusItem);
-                         droppedItems.push(bonusItem);
+            } else {
+                if (kills > 500) {
+                    rawGold = kills * ((enemy.goldMin + enemy.goldMax) / 2);
+                    rawXp = kills * ((enemy.xpMin + enemy.xpMax) / 2);
+                } else {
+                    for(let i=0; i<kills; i++) {
+                        rawGold += Math.floor(enemy.goldMin + Math.random() * (enemy.goldMax - enemy.goldMin + 1));
+                        rawXp += Math.floor(enemy.xpMin + Math.random() * (enemy.xpMax - enemy.xpMin + 1));
                     }
                 }
+            }
+            
+            goldGain = Math.floor(rawGold * (1 + snapshot.goldBonus));
+            xpGain = Math.floor(rawXp * (1 + snapshot.xpBonus));
+
+            newGold += goldGain;
+            newStats.totalGoldEarned += goldGain;
+            newStats.dungeonsCleared += 1;
+            newStats.monstersKilled += kills;
+
+            // Loot Logic (Gear)
+            const baseDropChance = dungeon.dropChance + snapshot.lootBonus;
+            const extraRolls = Math.floor(kills / 10);
+            const totalRolls = 1 + extraRolls;
+
+            for (let i = 0; i < totalRolls; i++) {
+                 if (Math.random() < baseDropChance) {
+                    if (newInventory.length < INVENTORY_SIZE) {
+                        const newItem = generateItem(dungeon.level, state.prestigeUpgrades);
+                        newInventory.push(newItem);
+                        droppedItems.push(newItem);
+
+                        // Secondary drop logic (3% chance)
+                        if (newInventory.length < INVENTORY_SIZE && Math.random() < 0.03) {
+                             const bonusItem = generateItem(dungeon.level, state.prestigeUpgrades);
+                             newInventory.push(bonusItem);
+                             droppedItems.push(bonusItem);
+                        }
+                    }
+                 }
+            }
+        } 
+        
+        // --- 2. GATHERING / FISHING REWARDS (MATERIALS) ---
+        else {
+             // Difficulty Calculation based on Power
+             const difficultyRatio = snapshot.power / dungeon.recommendedPower;
+             let yieldMultiplier = 1.0;
+             if (difficultyRatio < 1.0) yieldMultiplier = 0.5; // Low power penalty
+             if (difficultyRatio > 3.0) yieldMultiplier = 1.5; // Overpowered bonus (diminishing)
+             
+             // Base Yield Calculation
+             // Standard cycle: e.g. 15s duration. 
+             // We can treat 'kills' as 'cycles completed' if we want, but currently kills is derived from DPS.
+             // For gathering, let's derive 'cycles' from duration + proficiency.
+             // But to keep it synced with the tick logic which passes 'kills', let's reinterpret 'kills' as 'Success Ticks'.
+             
+             const cycles = Math.max(1, Math.floor(kills / 2)); // Gathering is slower than killing rats
+             
+             // Material Drops
+             if (dungeon.lootTable) {
+                 for(let i=0; i<cycles; i++) {
+                     if (Math.random() < (dungeon.dropChance * yieldMultiplier)) {
+                         const matId = dungeon.lootTable[Math.floor(Math.random() * dungeon.lootTable.length)];
+                         const currentQty = newMaterials[matId] || 0;
+                         newMaterials[matId] = currentQty + 1;
+                         
+                         foundMaterials[matId] = (foundMaterials[matId] || 0) + 1;
+                     }
+                 }
              }
+
+             // Proficiency XP (Instead of Combat XP)
+             const proficiencyXpGain = Math.floor(cycles * (dungeon.level * 2)); // 2xp per cycle * level
+             
+             run.adventurerIds.forEach(advId => {
+                const adventurerIndex = state.adventurers.findIndex(a => a.id === advId);
+                if (adventurerIndex > -1) {
+                    const adv = { ...newAdventurers[adventurerIndex] };
+                    if (dungeon.type === ContractType.GATHERING) {
+                        adv.gatheringXp = (adv.gatheringXp || 0) + proficiencyXpGain;
+                    } else if (dungeon.type === ContractType.FISHING) {
+                        adv.fishingXp = (adv.fishingXp || 0) + proficiencyXpGain;
+                    }
+                    newAdventurers[adventurerIndex] = adv;
+                }
+             });
         }
 
-        // XP Distribution
-        run.adventurerIds.forEach(advId => {
-            const adventurerIndex = state.adventurers.findIndex(a => a.id === advId);
-            if (adventurerIndex > -1) {
-                const adv = { ...newAdventurers[adventurerIndex] };
-                adv.xp += xpGain;
-                
-                while (adv.xp >= adv.xpToNextLevel) {
-                    adv.level += 1;
-                    adv.xp -= adv.xpToNextLevel;
-                    adv.xpToNextLevel = Math.floor(adv.xpToNextLevel * 1.2);
-                    adv.baseStats.damage += 1;
-                    adv.baseStats.health += 5;
+        // Common XP Distribution (Combat XP) - ONLY for Combat Contracts
+        if (isCombat) {
+            run.adventurerIds.forEach(advId => {
+                const adventurerIndex = state.adventurers.findIndex(a => a.id === advId);
+                if (adventurerIndex > -1) {
+                    const adv = { ...newAdventurers[adventurerIndex] };
+                    const oldLevel = adv.level;
+                    adv.xp += xpGain;
+                    
+                    while (adv.xp >= adv.xpToNextLevel) {
+                        adv.level += 1;
+                        adv.xp -= adv.xpToNextLevel;
+                        adv.xpToNextLevel = Math.floor(adv.xpToNextLevel * 1.2);
+                        adv.baseStats.damage += 1;
+                        adv.baseStats.health += 5;
+                    }
+                    
+                    // Skill Point Award Logic
+                    // Unlock at 5 (1 pt), then every 3 levels
+                    const oldPoints = calculateTotalSkillPoints(oldLevel);
+                    const newPoints = calculateTotalSkillPoints(adv.level);
+                    const diff = newPoints - oldPoints;
+                    
+                    if (diff > 0) {
+                        adv.skillPoints += diff;
+                    }
+
+                    newAdventurers[adventurerIndex] = adv;
                 }
-                newAdventurers[adventurerIndex] = adv;
-            }
-        });
+            });
+        }
       }
 
       const report: DungeonReport = {
@@ -252,6 +348,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
           goldEarned: goldGain,
           xpEarned: xpGain,
           itemsFound: droppedItems,
+          materialsFound: foundMaterials,
           timestamp: Date.now()
       };
 
@@ -289,6 +386,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         ...state,
         gold: newGold,
         inventory: newInventory,
+        materials: newMaterials,
         statistics: newStats,
         adventurers: newAdventurers,
         recentReports: [...state.recentReports, report],
@@ -451,6 +549,11 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         const currency = action.payload.currencyAwarded;
         
         // Reset everything except prestigeCurrency and prestigeUpgrades
+        // Retain materials? Prompt says "Ascension Interaction... Lifetime gathered materials tracked... Gold resets... Gear resets".
+        // It doesn't explicitly say materials persist in inventory, just tracked.
+        // Usually prestige resets inventory. I'll reset materials for now as is standard, but keeping stats would require a new stats field.
+        // For this iteration, reset materials.
+        
         return {
             ...initialState,
             prestigeCurrency: state.prestigeCurrency + currency,
@@ -666,6 +769,36 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         return state;
     }
 
+    case 'UNLOCK_SKILL': {
+        const { adventurerId, skillId } = action.payload;
+        const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
+        if (advIndex === -1) return state;
+
+        const adv = { ...state.adventurers[advIndex] };
+        
+        // Find specific node cost
+        const node = adv.skillTree?.find(n => n.id === skillId);
+        if (!node) return state;
+
+        const cost = node.cost || 1;
+
+        // Validation handled in UI but double check
+        if (adv.skillPoints < cost) return state;
+        if (adv.unlockedSkills.includes(skillId)) return state;
+
+        // Pay cost
+        adv.skillPoints -= cost;
+        adv.unlockedSkills = [...adv.unlockedSkills, skillId];
+
+        const newAdvs = [...state.adventurers];
+        newAdvs[advIndex] = adv;
+
+        return {
+            ...state,
+            adventurers: newAdvs
+        };
+    }
+
     default:
       return state;
   }
@@ -688,6 +821,7 @@ interface GameContextProps {
   buyPrestigeUpgrade: (upgradeId: string) => void;
   enchantItem: (itemId: string) => void;
   rerollStat: (itemId: string, statIndex: number) => void;
+  unlockSkill: (adventurerId: string, skillId: string) => void;
 }
 
 const GameContext = createContext<GameContextProps | undefined>(undefined);
@@ -712,6 +846,26 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     if (adv.baseStats.critChance === undefined) adv.baseStats.critChance = 0.05;
                 }
                 
+                // V9 Migration: Add proficiency XP
+                if (adv.gatheringXp === undefined) adv.gatheringXp = 0;
+                if (adv.fishingXp === undefined) adv.fishingXp = 0;
+                
+                // V10 Hybrid System Migration
+                if (!adv.traitId) {
+                     const trait = ADVENTURER_TRAITS[Math.floor(Math.random() * ADVENTURER_TRAITS.length)];
+                     adv.traitId = trait.id;
+                }
+                if (adv.skillPoints === undefined) {
+                     adv.skillPoints = calculateTotalSkillPoints(adv.level || 1);
+                }
+                if (!adv.unlockedSkills) {
+                     adv.unlockedSkills = [];
+                }
+                // V11: Unique Skill Tree Migration
+                if (!adv.skillTree) {
+                    adv.skillTree = generateSkillTree(adv.role);
+                }
+
                 // Patch equipped items for Tiers
                 Object.values(ItemType).forEach(type => {
                     const item = adv.slots[type];
@@ -741,6 +895,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (!parsed.prestigeUpgrades) parsed.prestigeUpgrades = {};
         if (parsed.prestigeCurrency === undefined) parsed.prestigeCurrency = 0;
+        
+        // V9 Migration: Materials
+        if (!parsed.materials) parsed.materials = {};
 
         // Clean up offline props if they exist in save
         delete parsed.offlineSetup;
@@ -811,7 +968,20 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     // Use Snapshot if available (New Logic), fallback to real-time (Old Logic - Migration)
                     const dps = run.snapshot ? run.snapshot.dps : calculatePartyDps(run.adventurerIds, state);
                     const totalDamage = dps * (run.duration / 1000);
-                    const kills = Math.floor(totalDamage / enemy.hp);
+                    
+                    let kills = Math.floor(totalDamage / enemy.hp);
+
+                    // Fix for Gathering/Fishing: Ensure at least 1 "kill" (cycle) if time completed, 
+                    // regardless of damage output vs HP threshold.
+                    // BUT introduce a small flat failure chance (5%) for flavor.
+                    if (dungeon.type !== ContractType.DUNGEON) {
+                        if (Math.random() < 0.05) {
+                            kills = 0; // Bad luck!
+                        } else {
+                            kills = Math.max(1, kills);
+                        }
+                    }
+
                     const success = kills > 0;
 
                     // Pass ID instead of object reference
@@ -908,8 +1078,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       dispatch({ type: 'REROLL_STAT', payload: { itemId, statIndex } });
   }, []);
 
+  const unlockSkill = useCallback((adventurerId: string, skillId: string) => {
+      dispatch({ type: 'UNLOCK_SKILL', payload: { adventurerId, skillId } });
+  }, []);
+
   return (
-    <GameContext.Provider value={{ state, startDungeon, cancelDungeon, stopRepeat, dismissReport, equipItem, unequipItem, salvageItem, salvageManyItems, buyUpgrade, recruitAdventurer, importSave, doPrestige, buyPrestigeUpgrade, enchantItem, rerollStat }}>
+    <GameContext.Provider value={{ state, startDungeon, cancelDungeon, stopRepeat, dismissReport, equipItem, unequipItem, salvageItem, salvageManyItems, buyUpgrade, recruitAdventurer, importSave, doPrestige, buyPrestigeUpgrade, enchantItem, rerollStat, unlockSkill }}>
       {children}
     </GameContext.Provider>
   );

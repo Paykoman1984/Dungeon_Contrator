@@ -1,17 +1,19 @@
 
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
-import { calculateAdventurerPower, formatNumber, getAdventurerStats, areItemsEqual, calculateConservativePower } from '../utils/gameMath';
-import { ItemType, AdventurerRole, Item } from '../types';
-import { Sword, Shield, Gem, UserPlus, Heart, Zap, Crosshair, Sparkles, ShieldAlert, RefreshCw } from 'lucide-react';
-import { RARITY_COLORS, ROLE_CONFIG, CLASS_SKILLS } from '../constants';
+import { calculateAdventurerPower, formatNumber, getAdventurerStats, areItemsEqual, calculateConservativePower, getEffectiveAdventurer } from '../utils/gameMath';
+import { ItemType, AdventurerRole, Item, Adventurer } from '../types';
+import { Sword, Shield, Gem, UserPlus, Heart, Zap, Crosshair, Sparkles, ShieldAlert, RefreshCw, Dna, GitMerge } from 'lucide-react';
+import { RARITY_COLORS, ROLE_CONFIG, CLASS_SKILLS, ADVENTURER_TRAITS } from '../constants';
 import { Tooltip, SkillTooltipContent } from './Tooltip';
 import { ItemIcon } from './ItemIcon';
 import { ItemDetailsModal } from './ItemDetailsModal';
+import { SkillTreeModal } from './SkillTreeModal';
 
 export const AdventurerList: React.FC = () => {
   const { state, recruitAdventurer } = useGame();
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [skillTreeAdventurer, setSkillTreeAdventurer] = useState<Adventurer | null>(null);
 
   const recruitCost = 100 * Math.pow(5, state.adventurers.length - 1);
   const canRecruit = state.gold >= recruitCost;
@@ -23,6 +25,13 @@ export const AdventurerList: React.FC = () => {
           <ItemDetailsModal 
             item={selectedItem} 
             onClose={() => setSelectedItem(null)} 
+          />
+      )}
+
+      {skillTreeAdventurer && (
+          <SkillTreeModal 
+            adventurer={skillTreeAdventurer} 
+            onClose={() => setSkillTreeAdventurer(null)} 
           />
       )}
 
@@ -56,12 +65,16 @@ export const AdventurerList: React.FC = () => {
           // Calculate Power Conservatively using helper
           const power = calculateConservativePower(adv, state);
 
-          // For stats display, we show what is currently equipped (Live) so user sees what they have changed
-          const activeAdv = (isBusy && snapshotAdv) ? snapshotAdv : adv;
+          // For stats display, we use the effective adventurer (Conservative Logic)
+          // This ensures that stats update instantly when unequipping, but delay when equipping
+          const activeAdv = getEffectiveAdventurer(adv, state);
           const effectiveStats = getAdventurerStats(activeAdv, state);
           
           const roleConfig = ROLE_CONFIG[adv.role];
           const skills = CLASS_SKILLS[adv.role];
+          
+          // Trait Lookup
+          const trait = ADVENTURER_TRAITS.find(t => t.id === adv.traitId);
           
           // Rarity border color map
           const rarityBorder = {
@@ -94,7 +107,9 @@ export const AdventurerList: React.FC = () => {
                        </div>
                   </div>
                   <div className="text-right">
-                      <div className="text-lg font-mono font-bold text-slate-200">{formatNumber(power)}</div>
+                      <div className="text-lg font-mono font-bold text-slate-200">
+                          {formatNumber(power)} <span className="text-xs text-slate-500 font-sans font-normal">Power</span>
+                      </div>
                       {isBusy && <div className="text-[9px] font-bold text-amber-500 uppercase tracking-wide">On Mission</div>}
                   </div>
               </div>
@@ -115,7 +130,40 @@ export const AdventurerList: React.FC = () => {
                       <div className="bg-indigo-500 h-full" style={{ width: `${Math.min(100, (adv.xp / adv.xpToNextLevel) * 100)}%` }}></div>
                   </div>
 
-                  {/* Skills (Pills) */}
+                  {/* Trait & Tree Access */}
+                  <div className="flex items-center justify-between gap-2">
+                       {/* Trait Pill */}
+                       {trait ? (
+                            <Tooltip content={<div className="text-xs"><div className="font-bold text-emerald-300">{trait.name}</div><div className="text-slate-400">{trait.description}</div></div>}>
+                                <div className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded bg-slate-900/60 border border-slate-700 text-emerald-300 cursor-help">
+                                    <Dna size={10} />
+                                    <span>{trait.name}</span>
+                                </div>
+                            </Tooltip>
+                       ) : <div />}
+
+                       {/* Tree Button */}
+                       <button 
+                            onClick={() => setSkillTreeAdventurer(adv)}
+                            className={`flex items-center gap-1.5 text-[10px] px-2 py-1 rounded border transition-colors
+                                ${adv.level >= 5 
+                                    ? 'bg-indigo-900/30 border-indigo-500/30 text-indigo-300 hover:bg-indigo-900/50' 
+                                    : 'bg-slate-900/30 border-slate-800 text-slate-600 cursor-not-allowed'
+                                }
+                            `}
+                            disabled={adv.level < 5}
+                       >
+                            <GitMerge size={10} />
+                            <span>Talents</span>
+                            {adv.skillPoints > 0 && (
+                                <span className="bg-yellow-500 text-slate-900 font-bold px-1 rounded-full animate-pulse">
+                                    {adv.skillPoints}
+                                </span>
+                            )}
+                       </button>
+                  </div>
+
+                  {/* Skills (Pills) - Legacy / Base Passives */}
                   <div className="flex flex-wrap gap-1.5">
                       {skills.map(skill => {
                           const isUnlocked = adv.level >= skill.unlockLevel;
