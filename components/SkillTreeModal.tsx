@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Adventurer, SkillNode } from '../types';
-import { X, Check, Lock, Heart, Sword, Coins, Skull, Shield, Zap, Crosshair, Box, Eye, Sparkles, Flame, Book, Star, Crown, Beaker, MousePointerClick } from 'lucide-react';
+import { X, Check, Lock, Heart, Sword, Coins, Skull, Shield, Zap, Crosshair, Box, Eye, Sparkles, Flame, Book, Star, Crown, Beaker, MousePointerClick, Gem, AlertOctagon, Dices } from 'lucide-react';
 
 interface SkillTreeModalProps {
     adventurer: Adventurer;
@@ -25,6 +25,20 @@ const SkillIconMap: Record<string, React.FC<any>> = {
     'Star': Star,
     'Crown': Crown,
     'Beaker': Beaker,
+    'Gem': Gem,
+    'Dice': Dices,
+};
+
+// Hardcoded layout logic to fix missing x/y in data
+// Maps node IDs to percentage positions (left, top)
+const LAYOUT_CONFIG: Record<string, { x: number, y: number }> = {
+    'root':     { x: 50, y: 85 },
+    'branch_l': { x: 30, y: 65 },
+    'branch_r': { x: 70, y: 65 },
+    'star_l':   { x: 10, y: 50 }, // Dead End Left
+    'star_r':   { x: 90, y: 50 }, // Dead End Right
+    'core':     { x: 50, y: 45 },
+    'cap':      { x: 50, y: 15 },
 };
 
 export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: initialAdventurer, onClose }) => {
@@ -42,11 +56,28 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
     // Determine selection status
     let canUnlockSelected = false;
     let isSelectedUnlocked = false;
+    let isSelectedExclusiveLocked = false;
     
     if (selectedNode) {
         isSelectedUnlocked = liveAdventurer.unlockedSkills.includes(selectedNode.id);
-        const requirementsMet = selectedNode.requires.length === 0 || selectedNode.requires.every(req => liveAdventurer.unlockedSkills.includes(req));
-        canUnlockSelected = !isSelectedUnlocked && requirementsMet && liveAdventurer.skillPoints >= selectedNode.cost;
+        
+        // Exclusive Check
+        if (!isSelectedUnlocked && selectedNode.exclusiveGroup) {
+            isSelectedExclusiveLocked = liveAdventurer.unlockedSkills.some(id => {
+                const sibling = tree.find(n => n.id === id);
+                return sibling && sibling.exclusiveGroup === selectedNode.exclusiveGroup;
+            });
+        }
+
+        // Parent Logic: 
+        // Simplification: Check if ANY parent is unlocked or if requires is empty
+        const hasParentUnlocked = selectedNode.requires.length === 0 || selectedNode.requires.some(req => liveAdventurer.unlockedSkills.includes(req));
+
+        canUnlockSelected = !isSelectedUnlocked && !isSelectedExclusiveLocked && hasParentUnlocked && liveAdventurer.skillPoints >= selectedNode.cost;
+    }
+
+    const getCoords = (id: string) => {
+        return LAYOUT_CONFIG[id] || { x: 50, y: 50 };
     }
 
     // Render Connections (Lines)
@@ -55,27 +86,33 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
             return node.requires.map(reqId => {
                 const reqNode = tree.find(n => n.id === reqId);
                 if (!reqNode) return null;
-
-                // Simple grid mapping to pixels. Assuming 3x4 grid.
-                // Node width approx 60px, gaps approx 40px.
-                // Center point calculation needs to match node rendering logic below.
-                const startX = reqNode.x * 100 + 50; 
-                const startY = 400 - (reqNode.y * 100 + 50); // Invert Y so 0 is bottom
-                const endX = node.x * 100 + 50;
-                const endY = 400 - (node.y * 100 + 50);
+                
+                const start = getCoords(reqNode.id);
+                const end = getCoords(node.id);
 
                 const isUnlocked = liveAdventurer.unlockedSkills.includes(node.id);
                 const reqUnlocked = liveAdventurer.unlockedSkills.includes(reqNode.id);
 
-                const lineColor = isUnlocked ? '#6366f1' : reqUnlocked ? '#475569' : '#1e293b';
+                let lineColor = '#1e293b'; // Locked path
+                if (isUnlocked) lineColor = '#6366f1'; // Full unlock
+                else if (reqUnlocked) lineColor = '#475569'; // Reachable path
+
+                // Check exclusivity for lines
+                if (node.exclusiveGroup) {
+                    const siblingLocked = liveAdventurer.unlockedSkills.some(id => {
+                        const s = tree.find(n => n.id === id);
+                        return s && s.exclusiveGroup === node.exclusiveGroup && s.id !== node.id;
+                    });
+                    if (siblingLocked) lineColor = '#331e1e'; // Dead path
+                }
 
                 return (
                     <line 
                         key={`${reqNode.id}-${node.id}`}
-                        x1={startX} y1={startY}
-                        x2={endX} y2={endY}
+                        x1={`${start.x}%`} y1={`${start.y}%`}
+                        x2={`${end.x}%`} y2={`${end.y}%`}
                         stroke={lineColor}
-                        strokeWidth="4"
+                        strokeWidth="2"
                     />
                 );
             });
@@ -95,8 +132,14 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                 {liveAdventurer.name}
                             </span>
                         </h2>
-                        <div className="text-xs text-slate-500 mt-1">
-                            Role: <span className="text-slate-300">{liveAdventurer.role}</span>
+                        <div className="text-xs text-slate-500 mt-1 flex gap-2">
+                            <span>Role: <span className="text-slate-300">{liveAdventurer.role}</span></span>
+                            {liveAdventurer.archetype && (
+                                <>
+                                    <span>•</span>
+                                    <span>Archetype: <span className="text-indigo-400">{liveAdventurer.archetype}</span></span>
+                                </>
+                            )}
                         </div>
                     </div>
                     <button onClick={onClose} className="text-slate-500 hover:text-white p-1 rounded-full hover:bg-slate-800 transition-colors">
@@ -108,8 +151,8 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                 <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
                     
                     {/* Left: Tree Visualizer */}
-                    <div className="flex-1 bg-slate-900 relative p-8 flex justify-center items-center min-h-[400px] overflow-auto md:border-r border-slate-800">
-                        <div className="relative w-[300px] h-[400px]">
+                    <div className="flex-1 bg-slate-900 relative flex justify-center items-center min-h-[400px] overflow-hidden md:border-r border-slate-800">
+                        <div className="relative w-full h-full max-w-[500px] max-h-[500px]">
                             {/* SVG Layer for Lines */}
                             <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
                                 {renderConnections()}
@@ -118,48 +161,68 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                             {/* Nodes */}
                             {tree.map(node => {
                                 const isUnlocked = liveAdventurer.unlockedSkills.includes(node.id);
-                                const requirementsMet = node.requires.length === 0 || node.requires.every(req => liveAdventurer.unlockedSkills.includes(req));
-                                // Can unlock check logic for node styling: 
-                                // Available if reqs met AND (enough points OR we want to show it as reachable but expensive)
-                                // Let's simplify: yellow border if reachable, even if can't afford right now.
-                                const isReachable = !isUnlocked && requirementsMet;
+                                const hasParentUnlocked = node.requires.length === 0 || node.requires.some(req => liveAdventurer.unlockedSkills.includes(req));
+                                
+                                // Exclusive Locked?
+                                let isExclusiveLocked = false;
+                                if (!isUnlocked && node.exclusiveGroup) {
+                                    isExclusiveLocked = liveAdventurer.unlockedSkills.some(id => {
+                                        const sibling = tree.find(n => n.id === id);
+                                        return sibling && sibling.exclusiveGroup === node.exclusiveGroup;
+                                    });
+                                }
+
+                                const isReachable = !isUnlocked && hasParentUnlocked && !isExclusiveLocked;
                                 const canAfford = liveAdventurer.skillPoints >= node.cost;
                                 const isLocked = !isUnlocked && !isReachable;
                                 const isSelected = selectedNodeId === node.id;
+                                const isModifier = node.effectType === 'MODIFIER';
 
                                 const Icon = SkillIconMap[node.icon] || Star;
 
-                                // Position: Invert Y so 0 is bottom
-                                const left = node.x * 100;
-                                const bottom = node.y * 100;
+                                const pos = getCoords(node.id);
 
                                 return (
                                     <div 
                                         key={node.id}
-                                        className="absolute w-[100px] h-[100px] flex items-center justify-center"
-                                        style={{ left: `${left}px`, bottom: `${bottom}px` }}
+                                        className="absolute w-12 h-12 -ml-6 -mt-6 flex items-center justify-center z-10"
+                                        style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
                                     >
                                         <button
                                             onClick={() => setSelectedNodeId(node.id)}
                                             className={`
-                                                relative w-14 h-14 rounded-full border-2 flex items-center justify-center transition-all shadow-lg group z-10
+                                                relative w-full h-full rounded-full border-2 flex items-center justify-center transition-all shadow-lg group
                                                 ${isSelected ? 'ring-4 ring-indigo-500/50 scale-110' : ''}
+                                                ${isModifier && !isLocked ? 'rounded-md rotate-45' : ''} 
                                                 ${isUnlocked 
                                                     ? 'bg-indigo-600 border-indigo-400 text-white shadow-indigo-500/50' 
-                                                    : isReachable
-                                                        ? canAfford 
-                                                            ? 'bg-slate-800 border-yellow-500 text-yellow-500 hover:scale-105 cursor-pointer'
-                                                            : 'bg-slate-800 border-slate-500 text-slate-500 hover:border-slate-400 cursor-pointer'
-                                                        : 'bg-slate-900 border-slate-700 text-slate-700 cursor-not-allowed grayscale'
+                                                    : isExclusiveLocked
+                                                        ? 'bg-slate-950 border-red-900/50 text-red-900 grayscale opacity-50 cursor-not-allowed'
+                                                        : isReachable
+                                                            ? canAfford 
+                                                                ? 'bg-slate-800 border-yellow-500 text-yellow-500 hover:scale-105 cursor-pointer'
+                                                                : 'bg-slate-800 border-slate-500 text-slate-500 hover:border-slate-400 cursor-pointer'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-700 cursor-not-allowed grayscale'
                                                 }
                                             `}
                                         >
-                                            <Icon size={24} />
-                                            {isLocked && <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center"><Lock size={12} className="text-slate-400"/></div>}
-                                            {isUnlocked && <div className="absolute -top-1 -right-1 bg-green-500 text-slate-900 rounded-full p-0.5"><Check size={8} strokeWidth={4} /></div>}
+                                            <div className={isModifier && !isLocked ? "-rotate-45" : ""}>
+                                                <Icon size={20} />
+                                            </div>
+
+                                            {isExclusiveLocked && (
+                                                <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center">
+                                                    <X size={16} className="text-red-500"/>
+                                                </div>
+                                            )}
+                                            
+                                            {isLocked && !isExclusiveLocked && <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center"><Lock size={12} className="text-slate-400"/></div>}
+                                            
+                                            {isUnlocked && <div className="absolute -top-1 -right-1 bg-green-500 text-slate-900 rounded-full p-0.5 z-20"><Check size={8} strokeWidth={4} /></div>}
+                                            
                                             {/* Cost Badge for non-unlocked */}
                                             {!isUnlocked && isReachable && (
-                                                <div className={`absolute -bottom-2 px-1.5 py-0.5 rounded text-[9px] font-bold border ${canAfford ? 'bg-slate-900 text-yellow-500 border-yellow-500' : 'bg-slate-900 text-red-500 border-red-500'}`}>
+                                                <div className={`absolute -bottom-2 px-1.5 py-0.5 rounded text-[8px] font-bold border z-20 ${canAfford ? 'bg-slate-900 text-yellow-500 border-yellow-500' : 'bg-slate-900 text-red-500 border-red-500'}`}>
                                                     {node.cost}
                                                 </div>
                                             )}
@@ -179,22 +242,37 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                         {React.createElement(SkillIconMap[selectedNode.icon] || Star, { size: 24 })}
                                     </div>
                                     <h3 className="text-xl font-bold text-white mb-1">{selectedNode.name}</h3>
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <span className={`text-xs px-2 py-0.5 rounded font-bold border ${isSelectedUnlocked ? 'bg-green-900/20 text-green-400 border-green-900/50' : canUnlockSelected ? 'bg-slate-800 text-yellow-400 border-yellow-500/50' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
-                                            {isSelectedUnlocked ? 'Learned' : canUnlockSelected ? 'Available' : 'Locked/Unaffordable'}
+                                    
+                                    <div className="flex flex-wrap items-center gap-2 mb-4">
+                                        <span className={`text-xs px-2 py-0.5 rounded font-bold border ${isSelectedUnlocked ? 'bg-green-900/20 text-green-400 border-green-900/50' : canUnlockSelected ? 'bg-slate-800 text-yellow-400 border-yellow-500/50' : isSelectedExclusiveLocked ? 'bg-red-900/20 text-red-500 border-red-900/50' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
+                                            {isSelectedUnlocked ? 'Learned' : isSelectedExclusiveLocked ? 'Locked (Path Choice)' : canUnlockSelected ? 'Available' : 'Locked'}
                                         </span>
-                                        {selectedNode.requires.length > 0 && !isSelectedUnlocked && (
-                                           <span className="text-xs text-slate-500">Requires previous nodes</span>
+                                        {selectedNode.exclusiveGroup && !isSelectedUnlocked && !isSelectedExclusiveLocked && (
+                                            <span className="text-[10px] text-orange-400 flex items-center gap-1">
+                                                <AlertOctagon size={10} /> Exclusive Choice
+                                            </span>
+                                        )}
+                                        {selectedNode.effectType === 'MODIFIER' && (
+                                            <span className="text-[10px] text-purple-400 flex items-center gap-1 border border-purple-500/30 px-1 rounded bg-purple-900/20">
+                                                <Crown size={10} /> Rule Change
+                                            </span>
                                         )}
                                     </div>
+
                                     <p className="text-slate-400 text-sm leading-relaxed border-t border-slate-800 pt-4">
                                         {selectedNode.description}
                                     </p>
+
+                                    {selectedNode.exclusiveGroup && !isSelectedUnlocked && !isSelectedExclusiveLocked && (
+                                        <div className="mt-4 p-2 bg-orange-900/10 border border-orange-900/30 rounded text-xs text-orange-300/80 italic">
+                                            Warning: Unlocking this talent will permanently lock the other Tier 2 choice.
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 <div className="mt-auto space-y-4">
                                     {/* Cost Display */}
-                                    {!isSelectedUnlocked && (
+                                    {!isSelectedUnlocked && !isSelectedExclusiveLocked && (
                                         <div className="flex justify-between items-center p-3 bg-slate-900 rounded border border-slate-800">
                                             <span className="text-sm text-slate-400">Cost</span>
                                             <span className={`font-bold ${liveAdventurer.skillPoints >= selectedNode.cost ? 'text-yellow-400' : 'text-red-400'}`}>
@@ -225,7 +303,7 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                             </>
                                         ) : (
                                             <>
-                                                <Lock size={18} /> {liveAdventurer.skillPoints < selectedNode.cost ? 'Need Points' : 'Locked'}
+                                                <Lock size={18} /> {isSelectedExclusiveLocked ? 'Mutually Exclusive' : liveAdventurer.skillPoints < selectedNode.cost ? 'Need Points' : 'Locked'}
                                             </>
                                         )}
                                     </button>

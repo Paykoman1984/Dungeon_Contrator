@@ -109,6 +109,34 @@ export const CLASS_WEAPONS: Record<AdventurerRole, WeaponType[]> = {
     [AdventurerRole.MAGE]: [WeaponType.STAFF, WeaponType.BOOK],
 };
 
+// --- ADVENTURER NAMES & TITLES ---
+
+export const ADVENTURER_NAMES = [
+    "Eldric", "Mara", "Thorne", "Silas", "Vesper", "Lyra", "Kael", "Aria", "Grom", "Elara",
+    "Bram", "Caelum", "Darius", "Elowen", "Fiora", "Garrick", "Hestia", "Isolde", "Jarek", "Kaelen",
+    "Liora", "Magnus", "Neria", "Orin", "Pael", "Quinn", "Rolan", "Seren", "Talia", "Ulric",
+    "Vane", "Wren", "Xander", "Yara", "Zephyr", "Ash", "Beryl", "Corin", "Dax", "Elian",
+    "Fen", "Gideon", "Hale", "Ira", "Joss", "Knox", "Lark", "Milo", "Nash", "Ode",
+    "Pyke", "Ren", "Sol", "Tor", "Ursa", "Val", "Wyatt", "Xen", "Yuri", "Zane"
+];
+
+// Titles based on Role and Rarity
+// Index 0: Common, 1: Uncommon, 2: Rare, 3: Epic, 4: Legendary
+export const TITLES_BY_ROLE: Record<AdventurerRole, string[]> = {
+    [AdventurerRole.WARRIOR]: [
+        "Squire", "Footman", "Guard", "Veteran", "Shieldbearer", 
+        "Knight", "Vanguard", "Commander", "Warlord", "Champion"
+    ],
+    [AdventurerRole.ROGUE]: [
+        "Pickpocket", "Scout", "Bandit", "Prowler", "Shadow", 
+        "Assassin", "Phantom", "Nightblade", "Whisper", "Deathstalker"
+    ],
+    [AdventurerRole.MAGE]: [
+        "Apprentice", "Novice", "Scholar", "Adept", "Weaver", 
+        "Sorcerer", "Arcanist", "Magus", "Archmage", "Grandmaster"
+    ]
+};
+
 // --- NEW SYSTEM: TRAITS (ARCHETYPES) ---
 export const ADVENTURER_TRAITS: AdventurerTrait[] = [
     { id: 'giant_slayer', name: 'Giant Slayer', description: '+10% Damage', effect: (s) => s.damage *= 1.10 },
@@ -120,64 +148,138 @@ export const ADVENTURER_TRAITS: AdventurerTrait[] = [
     { id: 'miner', name: 'Miner', description: '+10% Material Yield (simulated)', effect: (s) => s.lootLuck += 0.10 },
 ];
 
-// --- SKILL TREE TEMPLATES (Pools for Generation) ---
+// --- ARCHETYPE DEFINITIONS (Predefined Tree Templates) ---
 
-export const SKILL_TEMPLATES: Record<AdventurerRole, {
-    tier1: Partial<SkillNode>[],
-    tier2: Partial<SkillNode>[],
-    tier3: Partial<SkillNode>[]
-}> = {
-    [AdventurerRole.WARRIOR]: {
-        tier1: [
-            { name: 'Force', description: '+5% Damage', icon: 'Sword', effectType: 'STAT', effectValue: 0.05, statTarget: 'damage' },
-            { name: 'Hardened', description: '+5% Health', icon: 'Shield', effectType: 'STAT', effectValue: 0.05, statTarget: 'health' },
-            { name: 'Plunder', description: '+5% Gold Gain', icon: 'Coins', effectType: 'ECONOMY', effectValue: 0.05, statTarget: 'gold' },
-        ],
-        tier2: [
-            { name: 'Brutality', description: '+10% Damage', icon: 'Skull', effectType: 'STAT', effectValue: 0.10, statTarget: 'damage' },
-            { name: 'Endurance', description: '+10% Health', icon: 'Heart', effectType: 'STAT', effectValue: 0.10, statTarget: 'health' },
-            { name: 'Vanguard', description: '+10% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.10, statTarget: 'speed' },
-        ],
-        tier3: [
-            { name: 'Warlord', description: '+20% Damage & Health', icon: 'Crown', effectType: 'STAT', effectValue: 0.20, statTarget: 'all' },
-            { name: 'Titan', description: '+30% Health', icon: 'Shield', effectType: 'STAT', effectValue: 0.30, statTarget: 'health' },
-            { name: 'Berserker', description: '+25% Damage', icon: 'Sword', effectType: 'STAT', effectValue: 0.25, statTarget: 'damage' },
-        ]
-    },
-    [AdventurerRole.ROGUE]: {
-        tier1: [
-            { name: 'Agility', description: '+5% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.05, statTarget: 'speed' },
-            { name: 'Keen Eye', description: '+5% Crit Chance', icon: 'Crosshair', effectType: 'STAT', effectValue: 0.05, statTarget: 'crit' },
-            { name: 'Looting', description: '+5% Loot Luck', icon: 'Box', effectType: 'ECONOMY', effectValue: 0.05, statTarget: 'loot' },
-        ],
-        tier2: [
-            { name: 'Execution', description: '+10% Damage', icon: 'Sword', effectType: 'STAT', effectValue: 0.10, statTarget: 'damage' },
-            { name: 'Swiftness', description: '+10% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.10, statTarget: 'speed' },
-            { name: 'Fatal Strike', description: '+10% Crit Chance', icon: 'Skull', effectType: 'STAT', effectValue: 0.10, statTarget: 'crit' },
-        ],
-        tier3: [
-            { name: 'Shadow Walker', description: '+20% Speed & Crit', icon: 'Eye', effectType: 'STAT', effectValue: 0.20, statTarget: 'speed_crit' },
-            { name: 'Assassin', description: '+30% Damage', icon: 'Crosshair', effectType: 'STAT', effectValue: 0.30, statTarget: 'damage' },
-            { name: 'Master Thief', description: '+20% Gold & Loot', icon: 'Coins', effectType: 'ECONOMY', effectValue: 0.20, statTarget: 'gold' }, // Simplified to gold here for logic
-        ]
-    },
-    [AdventurerRole.MAGE]: {
-        tier1: [
-            { name: 'Intellect', description: '+5% Damage', icon: 'Sparkles', effectType: 'STAT', effectValue: 0.05, statTarget: 'damage' },
-            { name: 'Alchemy', description: '+5% Gold Gain', icon: 'Beaker', effectType: 'ECONOMY', effectValue: 0.05, statTarget: 'gold' },
-            { name: 'Focus', description: '+5% XP Gain', icon: 'Book', effectType: 'ECONOMY', effectValue: 0.05, statTarget: 'xp' },
-        ],
-        tier2: [
-            { name: 'Destruction', description: '+15% Damage', icon: 'Flame', effectType: 'STAT', effectValue: 0.15, statTarget: 'damage' },
-            { name: 'Wisdom', description: '+10% XP Gain', icon: 'Book', effectType: 'ECONOMY', effectValue: 0.10, statTarget: 'xp' },
-            { name: 'Glass', description: '+20% Dmg, -10% HP', icon: 'Zap', effectType: 'STAT', effectValue: 0.20, statTarget: 'damage' },
-        ],
-        tier3: [
-            { name: 'Archmage', description: '+30% Damage', icon: 'Star', effectType: 'STAT', effectValue: 0.30, statTarget: 'damage' },
-            { name: 'Timewarp', description: '+25% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.25, statTarget: 'speed' },
-            { name: 'Omniscience', description: '+20% XP & Gold', icon: 'Crown', effectType: 'ECONOMY', effectValue: 0.20, statTarget: 'xp' }, // Simplified
-        ]
-    }
+export interface ArchetypeDefinition {
+    name: string; // e.g. "Juggernaut"
+    role: AdventurerRole;
+    nodes: Partial<SkillNode>[]; 
+}
+
+/*
+    NEW NODE STRUCTURE MAPPING FOR VISUALIZER:
+    'root': Bottom Center
+    'branch_l': Middle Left Choice (Exclusive A)
+    'branch_r': Middle Right Choice (Exclusive A)
+    'star_l': Far Left Dead End (Req branch_l)
+    'star_r': Far Right Dead End (Req branch_r)
+    'core': Top Center Merge (Req branch_l OR branch_r)
+    'cap': Top Tip (Req core)
+*/
+
+export const ARCHETYPES: Record<AdventurerRole, ArchetypeDefinition[]> = {
+    [AdventurerRole.WARRIOR]: [
+        {
+            name: "Berserker",
+            role: AdventurerRole.WARRIOR,
+            nodes: [
+                { id: 'root', name: 'Battle Rage', description: '+10% Damage', icon: 'Sword', effectType: 'STAT', effectValue: 0.10, statTarget: 'damage', cost: 1 },
+                
+                // LEFT PATH (Offense)
+                { id: 'branch_l', name: 'Reckless Swing', description: '+20% Damage, -10% HP', icon: 'Skull', effectType: 'STAT', effectValue: 0.20, statTarget: 'damage', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_l', name: 'Decapitate', description: '+40% Crit Damage', icon: 'Crosshair', effectType: 'STAT', effectValue: 0.40, statTarget: 'damage', cost: 2, requires: ['branch_l'] }, // Dead End
+                
+                // RIGHT PATH (Speed)
+                { id: 'branch_r', name: 'Bloodlust', description: '+25% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.25, statTarget: 'speed', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_r', name: 'Adrenaline', description: '+15% Crit Chance', icon: 'Eye', effectType: 'STAT', effectValue: 0.15, statTarget: 'crit', cost: 2, requires: ['branch_r'] }, // Dead End
+
+                // MERGE
+                { id: 'core', name: 'Pain Tolerance', description: '+20% Health', icon: 'Heart', effectType: 'STAT', effectValue: 0.20, statTarget: 'health', cost: 2, requires: ['branch_l', 'branch_r'] },
+                
+                // CAPSTONE
+                { id: 'cap', name: 'Weapon Master', description: 'Weapon Stats 2x, No Trinket', icon: 'Sword', effectType: 'MODIFIER', modifier: 'WEAPON_MASTER', effectValue: 0, cost: 3, requires: ['core'] }
+            ]
+        },
+        {
+            name: "Juggernaut",
+            role: AdventurerRole.WARRIOR,
+            nodes: [
+                { id: 'root', name: 'Iron Skin', description: '+15% Health', icon: 'Shield', effectType: 'STAT', effectValue: 0.15, statTarget: 'health', cost: 1 },
+                
+                // LEFT PATH (Pure Tank)
+                { id: 'branch_l', name: 'Heavy Plating', description: '+30% Health', icon: 'Heart', effectType: 'STAT', effectValue: 0.30, statTarget: 'health', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_l', name: 'Unbreakable', description: '+20% Health, -10% Speed', icon: 'Shield', effectType: 'STAT', effectValue: 0.20, statTarget: 'health', cost: 2, requires: ['branch_l'] },
+
+                // RIGHT PATH (Utility Tank)
+                { id: 'branch_r', name: 'Vanguard', description: '+20% XP Gain', icon: 'Book', effectType: 'ECONOMY', effectValue: 0.20, statTarget: 'xp', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_r', name: 'Commander', description: '+15% Gold Gain', icon: 'Crown', effectType: 'ECONOMY', effectValue: 0.15, statTarget: 'gold', cost: 2, requires: ['branch_r'] },
+
+                // MERGE
+                { id: 'core', name: 'Fortress', description: '+10% Dmg & Health', icon: 'Crown', effectType: 'STAT', effectValue: 0.10, statTarget: 'all', cost: 2, requires: ['branch_l', 'branch_r'] },
+                
+                // CAPSTONE
+                { id: 'cap', name: 'Methodical', description: '+50% Rewards, +20% Time', icon: 'Clock', effectType: 'MODIFIER', modifier: 'METHODICAL', effectValue: 0, cost: 3, requires: ['core'] }
+            ]
+        }
+    ],
+    [AdventurerRole.ROGUE]: [
+        {
+            name: "Assassin",
+            role: AdventurerRole.ROGUE,
+            nodes: [
+                { id: 'root', name: 'Lethality', description: '+10% Crit Chance', icon: 'Crosshair', effectType: 'STAT', effectValue: 0.10, statTarget: 'crit', cost: 1 },
+                
+                { id: 'branch_l', name: 'Vital Points', description: '+25% Crit Damage', icon: 'Skull', effectType: 'STAT', effectValue: 0.25, statTarget: 'damage', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_l', name: 'Cold Blood', description: '+20% Damage', icon: 'Sword', effectType: 'STAT', effectValue: 0.20, statTarget: 'damage', cost: 2, requires: ['branch_l'] },
+
+                { id: 'branch_r', name: 'Ambush', description: '+25% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.25, statTarget: 'speed', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_r', name: 'Shadow Step', description: '+15% Crit Chance', icon: 'Eye', effectType: 'STAT', effectValue: 0.15, statTarget: 'crit', cost: 2, requires: ['branch_r'] },
+
+                { id: 'core', name: 'Executioner', description: '+15% Damage', icon: 'Sword', effectType: 'STAT', effectValue: 0.15, statTarget: 'damage', cost: 2, requires: ['branch_l', 'branch_r'] },
+                { id: 'cap', name: 'Gambler', description: 'Extra Loot, -50% Gold', icon: 'Dice', effectType: 'MODIFIER', modifier: 'GAMBLER', effectValue: 0, cost: 3, requires: ['core'] }
+            ]
+        },
+        {
+            name: "Scavenger",
+            role: AdventurerRole.ROGUE,
+            nodes: [
+                { id: 'root', name: 'Quick Fingers', description: '+15% Loot Luck', icon: 'Box', effectType: 'ECONOMY', effectValue: 0.15, statTarget: 'loot', cost: 1 },
+                
+                { id: 'branch_l', name: 'Appraiser', description: '+30% Gold Gain', icon: 'Coins', effectType: 'ECONOMY', effectValue: 0.30, statTarget: 'gold', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_l', name: 'Merchant', description: '+20% Gold Gain', icon: 'Coins', effectType: 'ECONOMY', effectValue: 0.20, statTarget: 'gold', cost: 2, requires: ['branch_l'] },
+
+                { id: 'branch_r', name: 'Surveyor', description: '+30% Material Yield', icon: 'Map', effectType: 'ECONOMY', effectValue: 0.30, statTarget: 'loot', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_r', name: 'Dungeoneer', description: '+20% XP Gain', icon: 'Book', effectType: 'ECONOMY', effectValue: 0.20, statTarget: 'xp', cost: 2, requires: ['branch_r'] },
+
+                { id: 'core', name: 'Escape Artist', description: '+15% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.15, statTarget: 'speed', cost: 2, requires: ['branch_l', 'branch_r'] },
+                { id: 'cap', name: 'Resourceful', description: 'Drops Mats instead of Items', icon: 'Gem', effectType: 'MODIFIER', modifier: 'RESOURCE_SCAVENGER', effectValue: 0, cost: 3, requires: ['core'] }
+            ]
+        }
+    ],
+    [AdventurerRole.MAGE]: [
+        {
+            name: "Archmage",
+            role: AdventurerRole.MAGE,
+            nodes: [
+                { id: 'root', name: 'Arcane Power', description: '+15% Damage', icon: 'Sparkles', effectType: 'STAT', effectValue: 0.15, statTarget: 'damage', cost: 1 },
+                
+                { id: 'branch_l', name: 'Overload', description: '+30% Dmg, -10% HP', icon: 'Flame', effectType: 'STAT', effectValue: 0.30, statTarget: 'damage', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_l', name: 'Cataclysm', description: '+40% Damage, -10% Speed', icon: 'Skull', effectType: 'STAT', effectValue: 0.40, statTarget: 'damage', cost: 2, requires: ['branch_l'] },
+
+                { id: 'branch_r', name: 'Time Warp', description: '+25% Speed', icon: 'Zap', effectType: 'STAT', effectValue: 0.25, statTarget: 'speed', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_r', name: 'Flow State', description: '+15% Crit Chance', icon: 'Eye', effectType: 'STAT', effectValue: 0.15, statTarget: 'crit', cost: 2, requires: ['branch_r'] },
+
+                { id: 'core', name: 'Focus', description: '+15% Crit Chance', icon: 'Eye', effectType: 'STAT', effectValue: 0.15, statTarget: 'crit', cost: 2, requires: ['branch_l', 'branch_r'] },
+                { id: 'cap', name: 'Glass Cannon', description: '+50% Dmg, -30% HP', icon: 'Skull', effectType: 'MODIFIER', modifier: 'GLASS_CANNON', effectValue: 0, cost: 3, requires: ['core'] }
+            ]
+        },
+        {
+            name: "Alchemist",
+            role: AdventurerRole.MAGE,
+            nodes: [
+                { id: 'root', name: 'Transmute', description: '+15% Gold Gain', icon: 'Beaker', effectType: 'ECONOMY', effectValue: 0.15, statTarget: 'gold', cost: 1 },
+                
+                { id: 'branch_l', name: 'Midas Touch', description: '+35% Gold Gain', icon: 'Coins', effectType: 'ECONOMY', effectValue: 0.35, statTarget: 'gold', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_l', name: 'Greed', description: '+10% Loot Luck', icon: 'Box', effectType: 'ECONOMY', effectValue: 0.10, statTarget: 'loot', cost: 2, requires: ['branch_l'] },
+
+                { id: 'branch_r', name: 'Philosopher', description: '+35% XP Gain', icon: 'Book', effectType: 'ECONOMY', effectValue: 0.35, statTarget: 'xp', cost: 1, exclusiveGroup: 't2' },
+                { id: 'star_r', name: 'Wisdom', description: '+20% XP Gain', icon: 'Book', effectType: 'ECONOMY', effectValue: 0.20, statTarget: 'xp', cost: 2, requires: ['branch_r'] },
+
+                { id: 'core', name: 'Potion Master', description: '+20% Health', icon: 'Heart', effectType: 'STAT', effectValue: 0.20, statTarget: 'health', cost: 2, requires: ['branch_l', 'branch_r'] },
+                { id: 'cap', name: 'Golden Touch', description: '+100% Gold, -20% Dmg', icon: 'Crown', effectType: 'MODIFIER', modifier: 'GOLDEN_TOUCH', effectValue: 0, cost: 3, requires: ['core'] }
+            ]
+        }
+    ]
 };
 
 // Legacy Skills (Kept for compatibility)

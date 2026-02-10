@@ -51,6 +51,17 @@ export interface AdventurerTrait {
     effect: (stats: any, state: any) => void; // Mutates stats object
 }
 
+export type SkillModifier = 
+    | 'NONE'
+    | 'WEAPON_MASTER' // Rule: Weapon Stats Doubled, Cannot equip Trinkets
+    | 'RESOURCE_SCAVENGER' // Rule: Drops Materials instead of Items
+    | 'GAMBLER' // Rule: +2 Loot Rolls, -50% Gold Rewards
+    | 'METHODICAL' // Rule: +50% Rewards, +20% Dungeon Duration
+    | 'RUSH' // +25% Speed, -15% Health (Stat mod)
+    | 'TITAN_GRIP' // +20% Damage, +20% Health, -10% Speed (Stat mod)
+    | 'GLASS_CANNON' // +40% Damage, -20% Health (Stat mod)
+    | 'GOLDEN_TOUCH'; // +50% Gold, -10% Damage (Stat mod)
+
 export interface SkillNode {
     id: string;
     name: string;
@@ -61,9 +72,11 @@ export interface SkillNode {
     requires: string[]; // IDs of prerequisite nodes
     maxLevel: number; // Usually 1 for small trees
     cost: number;
-    effectType: 'STAT' | 'ECONOMY' | 'SPEED';
+    effectType: 'STAT' | 'ECONOMY' | 'SPEED' | 'MODIFIER';
     effectValue: number; // e.g., 0.10 for 10%
     statTarget?: string; // 'damage', 'health', 'gold', etc.
+    exclusiveGroup?: string; // If set, unlocking this node locks others in the same group
+    modifier?: SkillModifier; // Special behavior flag
 }
 
 // -------------------------------
@@ -98,6 +111,7 @@ export interface Material {
 export interface Adventurer {
   id: string;
   name: string;
+  title: string; // New field for role/flavor title
   role: AdventurerRole;
   rarity: Rarity;
   level: number;
@@ -113,6 +127,7 @@ export interface Adventurer {
   skillPoints: number; // Available points
   unlockedSkills: string[]; // IDs of unlocked nodes from their Role tree
   skillTree: SkillNode[]; // New: Unique tree for this adventurer
+  archetype?: string; // Flavor name for the generated tree (e.g. "Berserker")
 
   slots: {
     [ItemType.WEAPON]: Item | null;
@@ -156,6 +171,7 @@ export interface RunSnapshot {
     goldBonus: number;
     xpBonus: number;
     lootBonus: number;
+    activeModifiers: string[]; // Track active rules for this run
 }
 
 export interface ActiveRun {

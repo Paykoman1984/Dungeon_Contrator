@@ -1,6 +1,6 @@
 
 import { Adventurer, Item, ItemType, Rarity, ItemStat, GameState, AdventurerRole, WeaponType, RunSnapshot, SkillNode } from '../types';
-import { UPGRADES, CLASS_SKILLS, ROLE_CONFIG, ADVENTURER_RARITY_MULTIPLIERS, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, TIER_WEIGHTS, TIER_MULTIPLIERS, CRAFTING_RARITY_MULTIPLIERS, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_TRAITS, SKILL_TEMPLATES } from '../constants';
+import { UPGRADES, CLASS_SKILLS, ROLE_CONFIG, ADVENTURER_RARITY_MULTIPLIERS, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, TIER_WEIGHTS, TIER_MULTIPLIERS, CRAFTING_RARITY_MULTIPLIERS, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_TRAITS, ARCHETYPES, ADVENTURER_NAMES, TITLES_BY_ROLE } from '../constants';
 
 export const formatNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(2) + 'M';
@@ -23,86 +23,39 @@ export const calculateTotalSkillPoints = (level: number): number => {
 };
 
 // --- UNIQUE SKILL TREE GENERATION ---
-export const generateSkillTree = (role: AdventurerRole): SkillNode[] => {
-    const templates = SKILL_TEMPLATES[role];
-    const tree: SkillNode[] = [];
+export const generateSkillTree = (role: AdventurerRole): { tree: SkillNode[], archetype: string } => {
+    const archetypes = ARCHETYPES[role];
+    const archetype = archetypes[Math.floor(Math.random() * archetypes.length)];
     
-    // Helper to pick random from array
-    const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-    
-    // 1. Root Node (Center, Tier 1, y=0) - Cost 1
-    const rootTpl = pick(templates.tier1);
-    const rootId = 'root';
-    tree.push({
-        ...rootTpl,
-        id: rootId,
-        x: 1, y: 0,
-        requires: [],
-        maxLevel: 1,
-        cost: 1,
-    } as SkillNode);
+    // Convert Partial<SkillNode> to SkillNode (ensuring defaults)
+    const tree: SkillNode[] = archetype.nodes.map(node => ({
+        ...node,
+        requires: node.requires || (node.id === 'root' ? [] : 
+                                     node.id.startsWith('l1') || node.id.startsWith('r1') ? ['root'] : 
+                                     node.id === 'mid' ? ['l1', 'r1'] : // Logic handled dynamically in UI for OR condition, simpler in data
+                                     node.id === 'cap' ? ['mid'] : []),
+        // Ensure standard fields if missing in template
+        maxLevel: node.maxLevel || 1,
+        exclusiveGroup: node.exclusiveGroup,
+        modifier: node.modifier || 'NONE'
+    } as SkillNode));
 
-    // 2. Left Branch (Tier 1, y=1) - Cost 1
-    const l1Tpl = pick(templates.tier1);
-    const l1Id = 'l1';
-    tree.push({
-        ...l1Tpl,
-        id: l1Id,
-        x: 0, y: 1,
-        requires: [rootId],
-        maxLevel: 1,
-        cost: 1,
-    } as SkillNode);
+    return { tree, archetype: archetype.name };
+};
 
-    // 3. Right Branch (Tier 1, y=1) - Cost 1
-    const r1Tpl = pick(templates.tier1);
-    const r1Id = 'r1';
-    tree.push({
-        ...r1Tpl,
-        id: r1Id,
-        x: 2, y: 1,
-        requires: [rootId],
-        maxLevel: 1,
-        cost: 1,
-    } as SkillNode);
-
-    // 4. Left Mid (Tier 2, y=2) - Cost 2
-    const l2Tpl = pick(templates.tier2);
-    const l2Id = 'l2';
-    tree.push({
-        ...l2Tpl,
-        id: l2Id,
-        x: 0, y: 2,
-        requires: [l1Id],
-        maxLevel: 1,
-        cost: 2,
-    } as SkillNode);
-
-    // 5. Right Mid (Tier 2, y=2) - Cost 2
-    const r2Tpl = pick(templates.tier2);
-    const r2Id = 'r2';
-    tree.push({
-        ...r2Tpl,
-        id: r2Id,
-        x: 2, y: 2,
-        requires: [r1Id],
-        maxLevel: 1,
-        cost: 2,
-    } as SkillNode);
-
-    // 6. Capstone (Top, y=3) - Cost 3
-    const capTpl = pick(templates.tier3);
-    const capId = 'cap';
-    tree.push({
-        ...capTpl,
-        id: capId,
-        x: 1, y: 3,
-        requires: [l2Id, r2Id],
-        maxLevel: 1,
-        cost: 3,
-    } as SkillNode);
-
-    return tree;
+// Helper to get active modifiers for a list of adventurers
+export const getActiveModifiers = (adventurerIds: string[], state: GameState): string[] => {
+    const modifiers: string[] = [];
+    adventurerIds.forEach(id => {
+        const adv = state.adventurers.find(a => a.id === id);
+        if (adv && adv.unlockedSkills) {
+             adv.unlockedSkills.forEach(skillId => {
+                 const node = adv.skillTree?.find(n => n.id === skillId);
+                 if (node?.modifier && node.modifier !== 'NONE') modifiers.push(node.modifier);
+             });
+        }
+    });
+    return modifiers;
 };
 
 interface EffectiveStats {
@@ -129,8 +82,7 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
     const trainingBonus = UPGRADES.find(u => u.id === 'recruit_training')?.effect(trainingLevel) || 0;
     stats.damage += trainingBonus;
 
-    // 2. Class Skills (Legacy - Keep for compatibility or remove if fully replacing)
-    // We keep them as base mechanics for now.
+    // 2. Class Skills (Legacy)
     const skills = CLASS_SKILLS[adventurer.role] || [];
     skills.forEach(skill => {
         if (adventurer.level >= skill.unlockLevel) {
@@ -156,12 +108,19 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         }
     }
 
-    // 4. Skill Tree (Now uses the Adventurer's unique tree)
+    // 4. Skill Tree (Stats & Modifiers)
+    const activeModifiers: string[] = [];
+
     if (adventurer.unlockedSkills && adventurer.skillTree) {
         const tree = adventurer.skillTree;
         adventurer.unlockedSkills.forEach(skillId => {
             const node = tree.find(n => n.id === skillId);
             if (node) {
+                // Modifiers
+                if (node.effectType === 'MODIFIER' && node.modifier) {
+                    activeModifiers.push(node.modifier);
+                }
+
                 // Apply node effects
                 if (node.effectType === 'STAT') {
                     if (node.statTarget === 'damage' || node.statTarget === 'all') stats.damage *= (1 + node.effectValue);
@@ -178,29 +137,57 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         });
     }
 
-    // 5. Gear Stats
+    // 5. Modifier Pre-Calculation (Base Stat alterations)
+    if (activeModifiers.includes('RUSH')) {
+        stats.speed *= 1.30;
+        stats.health *= 0.85;
+    }
+    if (activeModifiers.includes('GLASS_CANNON')) {
+        stats.damage *= 1.50;
+        stats.health *= 0.70;
+    }
+    if (activeModifiers.includes('TITAN_GRIP')) {
+        stats.damage *= 1.20;
+        stats.health *= 1.20;
+        stats.speed *= 0.90;
+    }
+    if (activeModifiers.includes('GOLDEN_TOUCH')) {
+        stats.goldGain += 1.0;
+        stats.damage *= 0.80;
+    }
+
+    // 6. Gear Stats
+    // Modifiers affect gear application
+    const isWeaponMaster = activeModifiers.includes('WEAPON_MASTER');
+
     Object.values(adventurer.slots).forEach((item) => {
         if (item) {
+          // Rule: Weapon Master disables Trinkets stats entirely (effectively unequipped)
+          if (isWeaponMaster && item.type === ItemType.TRINKET) return;
+
+          let multiplier = 1.0;
+          if (isWeaponMaster && item.type === ItemType.WEAPON) multiplier = 2.0; // DOUBLE STATS
+
           item.stats.forEach((stat) => {
             if (stat.name === 'Damage') {
-                if (stat.isPercentage) stats.damage *= (1 + stat.value / 100);
-                else stats.damage += stat.value;
+                if (stat.isPercentage) stats.damage *= (1 + (stat.value * multiplier) / 100);
+                else stats.damage += (stat.value * multiplier);
             }
             if (stat.name === 'Health') {
-                if (stat.isPercentage) stats.health *= (1 + stat.value / 100);
-                else stats.health += stat.value;
+                if (stat.isPercentage) stats.health *= (1 + (stat.value * multiplier) / 100);
+                else stats.health += (stat.value * multiplier);
             }
             if (stat.name === 'Crit Chance') {
-                stats.critChance += stat.value / 100;
+                stats.critChance += (stat.value * multiplier) / 100;
             }
             if (stat.name === 'Speed') {
-                stats.speed += stat.value / 100;
+                stats.speed += (stat.value * multiplier) / 100;
             }
-            if (stat.name === 'Gold Gain') stats.goldGain += stat.value / 100;
-            if (stat.name === 'Loot Luck') stats.lootLuck += stat.value / 100;
+            if (stat.name === 'Gold Gain') stats.goldGain += (stat.value * multiplier) / 100;
+            if (stat.name === 'Loot Luck') stats.lootLuck += (stat.value * multiplier) / 100;
           });
         }
-      });
+    });
 
     return {
         damage: Math.floor(stats.damage),
@@ -221,30 +208,18 @@ export const calculateAdventurerPower = (adventurer: Adventurer, state: GameStat
 };
 
 // Generates an adventurer object that reflects the "Conservative" state.
-// - If equipping/swapping while busy: Returns EMPTY slot (Loss of power)
-// - If unequipping while busy: Returns EMPTY slot (Instant update)
 export const getEffectiveAdventurer = (adventurer: Adventurer, state: GameState): Adventurer => {
     const run = state.activeRuns.find(r => r.adventurerIds.includes(adventurer.id));
-    
-    // Start with live adventurer clone
     const effectiveAdv = { ...adventurer, slots: { ...adventurer.slots } };
 
     if (run && run.adventurerState) {
-        // Access snapshot state if available
         const snapshotAdv = run.adventurerState[adventurer.id];
-
         if (snapshotAdv) {
              ([ItemType.WEAPON, ItemType.ARMOR, ItemType.TRINKET] as ItemType[]).forEach(type => {
                 const liveItem = effectiveAdv.slots[type];
                 const snapshotItem = snapshotAdv.slots[type];
                 
-                // 1. Check Modified List (Strongest Check)
-                // If a slot has been touched (Equip/Unequip) during the run, it is "Pending".
-                // Pending slots provide 0 stats (acting as Null) until the run finishes.
                 const isModified = run.modifiedSlots?.[adventurer.id]?.includes(type);
-
-                // 2. Check Equality (Fallback)
-                // Even if not tracked in modifiedSlots, if items differ, it's pending.
                 const isDifferent = !areItemsEqual(liveItem, snapshotItem);
                 
                 if (isModified || isDifferent) {
@@ -253,23 +228,17 @@ export const getEffectiveAdventurer = (adventurer: Adventurer, state: GameState)
             });
         }
     }
-
     return effectiveAdv;
 };
 
-// Calculates power treating "Pending" (modified) slots by falling back to the Snapshot item
-// This ensures that modifying gear during a run doesn't instantly change the displayed power 
-// or stats until the run is complete.
 export const calculateConservativePower = (adventurer: Adventurer, state: GameState): number => {
     const effectiveAdv = getEffectiveAdventurer(adventurer, state);
     return calculateAdventurerPower(effectiveAdv, state);
 };
 
-// Calculates an "Item Score" for comparison purposes
 export const calculateItemRating = (item: Item): number => {
     let score = 0;
     item.stats.forEach(stat => {
-        // Weights calibrated to reflect approximate contribution to power
         if (stat.name === 'Damage') score += stat.value * 5; 
         else if (stat.name === 'Health') score += stat.value * 1; 
         else if (stat.name === 'Speed') score += stat.value * 10;
@@ -297,7 +266,6 @@ export const calculatePartyDps = (adventurerIds: string[], state: GameState): nu
     return totalDps;
 };
 
-// Calculate generic stats from item affixes across the party (e.g. Gold Gain, Magic Find)
 export const calculatePartyStat = (adventurerIds: string[], state: GameState, statName: string): number => {
     let totalValue = 0;
     adventurerIds.forEach(id => {
@@ -317,11 +285,24 @@ export const calculatePartyStat = (adventurerIds: string[], state: GameState, st
     return totalValue;
 };
 
-export const calculateDungeonDuration = (baseDuration: number, state: GameState): number => {
+export const calculateDungeonDuration = (baseDuration: number, state: GameState, adventurerIds?: string[]): number => {
   const speedLevel = state.upgrades['logistics_network'] || 0;
   const reduction = UPGRADES.find(u => u.id === 'logistics_network')?.effect(speedLevel) || 0;
   const effectiveReduction = Math.min(reduction, 0.5);
-  return Math.max(1, baseDuration * (1 - effectiveReduction));
+  
+  let duration = Math.max(1, baseDuration * (1 - effectiveReduction));
+
+  // Check for METHODICAL modifier
+  if (adventurerIds) {
+      const activeModifiers = getActiveModifiers(adventurerIds, state);
+      // Stackable? If multiple Methodical, it gets very long. Let's make it additive +20% per.
+      const methodicalCount = activeModifiers.filter(m => m === 'METHODICAL').length;
+      if (methodicalCount > 0) {
+          duration *= (1 + (0.20 * methodicalCount));
+      }
+  }
+
+  return duration;
 };
 
 export const calculateRunSnapshot = (adventurerIds: string[], state: GameState): RunSnapshot => {
@@ -334,8 +315,10 @@ export const calculateRunSnapshot = (adventurerIds: string[], state: GameState):
         return sum + (adv ? calculateAdventurerPower(adv, state) : 0);
     }, 0);
 
-    // 3. Bonuses (Global Upgrades + Gear Stats + Skills)
-    // We iterate adventurers to sum up their individual bonuses from stats/skills
+    // 3. Modifiers (Rules)
+    const activeModifiers = getActiveModifiers(adventurerIds, state);
+
+    // 4. Bonuses
     let partyGoldBonus = 0;
     let partyXpBonus = 0;
     let partyLootBonus = 0;
@@ -349,6 +332,20 @@ export const calculateRunSnapshot = (adventurerIds: string[], state: GameState):
             partyLootBonus += stats.lootLuck;
         }
     });
+    
+    // Methodical Bonus logic
+    const methodicalCount = activeModifiers.filter(m => m === 'METHODICAL').length;
+    if (methodicalCount > 0) {
+        partyGoldBonus += 0.50 * methodicalCount;
+        partyXpBonus += 0.50 * methodicalCount;
+        partyLootBonus += 0.50 * methodicalCount;
+    }
+
+    // Gambler Logic (-50% Gold)
+    const gamblerCount = activeModifiers.filter(m => m === 'GAMBLER').length;
+    if (gamblerCount > 0) {
+        partyGoldBonus -= 0.50 * gamblerCount;
+    }
 
     // Economy Global
     const ecoLevel = state.upgrades['marketplace_connections'] || 0;
@@ -373,11 +370,12 @@ export const calculateRunSnapshot = (adventurerIds: string[], state: GameState):
         power,
         goldBonus: totalGoldBonus,
         xpBonus: totalXpBonus,
-        lootBonus: totalLootBonus
+        lootBonus: totalLootBonus,
+        activeModifiers
     };
 };
 
-export const generateAdventurer = (id: string, name: string): Adventurer => {
+export const generateAdventurer = (id: string, _placeholderName?: string): Adventurer => {
     const roles = Object.values(AdventurerRole);
     const role = roles[Math.floor(Math.random() * roles.length)];
     const config = ROLE_CONFIG[role];
@@ -391,12 +389,31 @@ export const generateAdventurer = (id: string, name: string): Adventurer => {
 
     const multiplier = ADVENTURER_RARITY_MULTIPLIERS[rarity];
 
-    // Assign Random Trait
     const trait = ADVENTURER_TRAITS[Math.floor(Math.random() * ADVENTURER_TRAITS.length)];
+    const { tree, archetype } = generateSkillTree(role);
+
+    // Name & Title Generation
+    const name = ADVENTURER_NAMES[Math.floor(Math.random() * ADVENTURER_NAMES.length)];
+    
+    // Determine title index based on rarity or random
+    const titleOptions = TITLES_BY_ROLE[role];
+    let titleIndex = 0;
+    // Map Rarity to Title Index roughly (Common=0..1, Unc=2..3, Rare=4..5, etc.)
+    // Or just randomized flavor. Let's do rough mapping.
+    if (rarity === Rarity.LEGENDARY) titleIndex = Math.floor(Math.random() * 2) + 8; // 8,9
+    else if (rarity === Rarity.EPIC) titleIndex = Math.floor(Math.random() * 2) + 6; // 6,7
+    else if (rarity === Rarity.RARE) titleIndex = Math.floor(Math.random() * 2) + 4; // 4,5
+    else if (rarity === Rarity.UNCOMMON) titleIndex = Math.floor(Math.random() * 2) + 2; // 2,3
+    else titleIndex = Math.floor(Math.random() * 2); // 0,1
+    
+    // Safety clamp
+    titleIndex = Math.max(0, Math.min(titleIndex, titleOptions.length - 1));
+    const title = titleOptions[titleIndex];
 
     return {
         id,
         name,
+        title,
         role,
         rarity,
         level: 1,
@@ -407,7 +424,8 @@ export const generateAdventurer = (id: string, name: string): Adventurer => {
         traitId: trait.id,
         skillPoints: 0,
         unlockedSkills: [],
-        skillTree: generateSkillTree(role), // Generate Unique Tree
+        skillTree: tree, 
+        archetype: archetype,
         slots: { [ItemType.WEAPON]: null, [ItemType.ARMOR]: null, [ItemType.TRINKET]: null },
         baseStats: {
             damage: Math.ceil(config.baseDmg * multiplier),
@@ -418,6 +436,7 @@ export const generateAdventurer = (id: string, name: string): Adventurer => {
     };
 }
 
+// ... (Rest of file remains unchanged: generateItem, getStatBudget, etc.) ...
 // === Item Generation & Crafting ===
 
 // Unified Item Rarity Multipliers (Cleaner Scaling)
@@ -592,9 +611,6 @@ export const calculatePrestigeGain = (totalLifetimeGold: number): number => {
     return Math.floor(Math.sqrt(totalLifetimeGold / 10000));
 };
 
-// Calculate upgrade cost based on item rarity, level, and type of upgrade
-// Reroll = Base * Level * RarityMult
-// Enchant = Base * Level * RarityMult * (StatsCount)
 export const calculateItemUpgradeCost = (item: Item, type: 'ENCHANT' | 'REROLL'): number => {
     const rarityMult = CRAFTING_RARITY_MULTIPLIERS[item.rarity];
     

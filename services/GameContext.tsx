@@ -1,13 +1,13 @@
 
 import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
 import { GameState, Item, Adventurer, Dungeon, ActiveRun, ItemType, DungeonReport, AdventurerRole, Rarity, RunSnapshot, ContractType } from '../types';
-import { DUNGEONS, INITIAL_GOLD, UPGRADES, INVENTORY_SIZE, ROLE_CONFIG, ENEMIES, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_RARITY_MULTIPLIERS, TIER_MULTIPLIERS, MATERIALS, ADVENTURER_TRAITS } from '../constants';
+import { DUNGEONS, INITIAL_GOLD, UPGRADES, INVENTORY_SIZE, ROLE_CONFIG, ENEMIES, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_RARITY_MULTIPLIERS, TIER_MULTIPLIERS, MATERIALS, ADVENTURER_TRAITS, TITLES_BY_ROLE } from '../constants';
 import { calculateAdventurerPower, calculateDungeonDuration, generateItem, generateAdventurer, calculatePartyDps, calculatePartyStat, calculatePrestigeGain, generateRandomAffix, rollStatTier, ITEM_RARITY_MULTIPLIERS, calculateItemUpgradeCost, calculateRunSnapshot, calculateTotalSkillPoints, generateSkillTree } from '../utils/gameMath';
 
 const STORAGE_KEY = 'idle_dungeon_contractor_save_v1';
 
 // Initial State
-const initialAdventurer = generateAdventurer('adv_1', 'Rookie');
+const initialAdventurer = generateAdventurer('adv_1');
 initialAdventurer.role = AdventurerRole.WARRIOR;
 initialAdventurer.rarity = Rarity.COMMON;
 initialAdventurer.baseStats = {
@@ -56,7 +56,8 @@ type Action =
   | { type: 'BUY_PRESTIGE_UPGRADE'; payload: { upgradeId: string; cost: number } }
   | { type: 'ENCHANT_ITEM'; payload: { itemId: string } }
   | { type: 'REROLL_STAT'; payload: { itemId: string; statIndex: number } }
-  | { type: 'UNLOCK_SKILL'; payload: { adventurerId: string; skillId: string } };
+  | { type: 'UNLOCK_SKILL'; payload: { adventurerId: string; skillId: string } }
+  | { type: 'RENAME_ADVENTURER'; payload: { adventurerId: string; newName: string } };
 
 const gameReducer = (state: GameState, action: Action): GameState => {
   switch (action.type) {
@@ -83,7 +84,15 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                      a.unlockedSkills = [];
                  }
                  if (!a.skillTree) {
-                     a.skillTree = generateSkillTree(a.role);
+                     // Generate new tree structure with archetype
+                     const { tree, archetype } = generateSkillTree(a.role);
+                     a.skillTree = tree;
+                     a.archetype = archetype;
+                 }
+                 // Name/Title Migration
+                 if (!a.title) {
+                     const titles = TITLES_BY_ROLE[a.role] || ["Mercenary"];
+                     a.title = titles[0]; // Default to basic title if migrating
                  }
 
                  return {
@@ -115,7 +124,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
       const dungeon = DUNGEONS.find(d => d.id === action.payload.dungeonId);
       if (!dungeon) return state;
       
-      const duration = calculateDungeonDuration(dungeon.durationSeconds, state) * 1000;
+      const duration = calculateDungeonDuration(dungeon.durationSeconds, state, action.payload.adventurerIds) * 1000;
       
       // Calculate Snapshot
       const snapshot = calculateRunSnapshot(action.payload.adventurerIds, state);
@@ -242,19 +251,38 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             const baseDropChance = dungeon.dropChance + snapshot.lootBonus;
             const extraRolls = Math.floor(kills / 10);
             const totalRolls = 1 + extraRolls;
+            
+            // Modifier Rules Check
+            const activeModifiers = snapshot.activeModifiers || [];
+            const isResourceScavenger = activeModifiers.includes('RESOURCE_SCAVENGER');
+            const isGambler = activeModifiers.includes('GAMBLER');
 
-            for (let i = 0; i < totalRolls; i++) {
+            // Gambler Rule: Extra Rolls
+            const adjustedTotalRolls = totalRolls + (isGambler ? 2 : 0);
+
+            for (let i = 0; i < adjustedTotalRolls; i++) {
                  if (Math.random() < baseDropChance) {
-                    if (newInventory.length < INVENTORY_SIZE) {
-                        const newItem = generateItem(dungeon.level, state.prestigeUpgrades);
-                        newInventory.push(newItem);
-                        droppedItems.push(newItem);
+                    
+                    if (isResourceScavenger) {
+                        // RULE: Drop Material Instead of Item
+                        const matIds = Object.keys(MATERIALS);
+                        const matId = matIds[Math.floor(Math.random() * matIds.length)]; // Generic scavenge
+                        const currentQty = newMaterials[matId] || 0;
+                        newMaterials[matId] = currentQty + 1;
+                        foundMaterials[matId] = (foundMaterials[matId] || 0) + 1;
+                    } else {
+                        // Standard Item Drop
+                        if (newInventory.length < INVENTORY_SIZE) {
+                            const newItem = generateItem(dungeon.level, state.prestigeUpgrades);
+                            newInventory.push(newItem);
+                            droppedItems.push(newItem);
 
-                        // Secondary drop logic (3% chance)
-                        if (newInventory.length < INVENTORY_SIZE && Math.random() < 0.03) {
-                             const bonusItem = generateItem(dungeon.level, state.prestigeUpgrades);
-                             newInventory.push(bonusItem);
-                             droppedItems.push(bonusItem);
+                            // Secondary drop logic (3% chance)
+                            if (newInventory.length < INVENTORY_SIZE && Math.random() < 0.03) {
+                                const bonusItem = generateItem(dungeon.level, state.prestigeUpgrades);
+                                newInventory.push(bonusItem);
+                                droppedItems.push(bonusItem);
+                            }
                         }
                     }
                  }
@@ -269,13 +297,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
              if (difficultyRatio < 1.0) yieldMultiplier = 0.5; // Low power penalty
              if (difficultyRatio > 3.0) yieldMultiplier = 1.5; // Overpowered bonus (diminishing)
              
-             // Base Yield Calculation
-             // Standard cycle: e.g. 15s duration. 
-             // We can treat 'kills' as 'cycles completed' if we want, but currently kills is derived from DPS.
-             // For gathering, let's derive 'cycles' from duration + proficiency.
-             // But to keep it synced with the tick logic which passes 'kills', let's reinterpret 'kills' as 'Success Ticks'.
-             
-             const cycles = Math.max(1, Math.floor(kills / 2)); // Gathering is slower than killing rats
+             const cycles = Math.max(1, Math.floor(kills / 2)); 
              
              // Material Drops
              if (dungeon.lootTable) {
@@ -290,7 +312,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                  }
              }
 
-             // Proficiency XP (Instead of Combat XP)
+             // Proficiency XP
              const proficiencyXpGain = Math.floor(cycles * (dungeon.level * 2)); // 2xp per cycle * level
              
              run.adventurerIds.forEach(advId => {
@@ -325,7 +347,6 @@ const gameReducer = (state: GameState, action: Action): GameState => {
                     }
                     
                     // Skill Point Award Logic
-                    // Unlock at 5 (1 pt), then every 3 levels
                     const oldPoints = calculateTotalSkillPoints(oldLevel);
                     const newPoints = calculateTotalSkillPoints(adv.level);
                     const diff = newPoints - oldPoints;
@@ -374,7 +395,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
               id: crypto.randomUUID(), 
               runsRemaining: run.autoRepeat ? 1 : run.runsRemaining - 1,
               startTime: Date.now(),
-              duration: calculateDungeonDuration(dungeon.durationSeconds, state) * 1000,
+              duration: calculateDungeonDuration(dungeon.durationSeconds, state, run.adventurerIds) * 1000,
               snapshot: nextSnapshot, 
               adventurerState: nextAdventurerState,
               modifiedSlots: {} // Clear modifications for fresh run
@@ -401,6 +422,7 @@ const gameReducer = (state: GameState, action: Action): GameState => {
             recentReports: state.recentReports.filter(r => r.id !== action.payload.reportId)
         };
     }
+    // ... [Rest of file unchanged until default] ...
 
     case 'EQUIP_ITEM': {
         const { adventurerId, item } = action.payload;
@@ -425,210 +447,100 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         const newAdvs = [...state.adventurers];
         newAdvs[advIndex] = adv;
         
-        // --- TRACK MODIFICATIONS IF BUSY ---
         let newActiveRuns = state.activeRuns;
         const activeRunIndex = state.activeRuns.findIndex(r => r.adventurerIds.includes(adventurerId));
         if (activeRunIndex !== -1) {
             newActiveRuns = [...state.activeRuns];
             const run = { ...newActiveRuns[activeRunIndex] };
-            
             const modifiedSlots = run.modifiedSlots ? { ...run.modifiedSlots } : {};
             const advMods = modifiedSlots[adventurerId] ? [...modifiedSlots[adventurerId]] : [];
-            
-            if (!advMods.includes(item.type)) {
-                advMods.push(item.type);
-            }
-            
+            if (!advMods.includes(item.type)) advMods.push(item.type);
             modifiedSlots[adventurerId] = advMods;
             run.modifiedSlots = modifiedSlots;
             newActiveRuns[activeRunIndex] = run;
         }
 
-        return {
-            ...state,
-            adventurers: newAdvs,
-            inventory: newInv,
-            activeRuns: newActiveRuns
-        };
+        return { ...state, adventurers: newAdvs, inventory: newInv, activeRuns: newActiveRuns };
     }
-
     case 'UNEQUIP_ITEM': {
         const { adventurerId, slot } = action.payload;
         const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
         if (advIndex === -1) return state;
-        
         const adv = { ...state.adventurers[advIndex] };
         const item = adv.slots[slot];
-        
         if (!item || state.inventory.length >= INVENTORY_SIZE) return state;
 
         adv.slots = { ...adv.slots, [slot]: null };
         const newAdvs = [...state.adventurers];
         newAdvs[advIndex] = adv;
 
-        // --- TRACK MODIFICATIONS IF BUSY ---
         let newActiveRuns = state.activeRuns;
         const activeRunIndex = state.activeRuns.findIndex(r => r.adventurerIds.includes(adventurerId));
         if (activeRunIndex !== -1) {
              newActiveRuns = [...state.activeRuns];
              const run = { ...newActiveRuns[activeRunIndex] };
-             
              const modifiedSlots = run.modifiedSlots ? { ...run.modifiedSlots } : {};
              const advMods = modifiedSlots[adventurerId] ? [...modifiedSlots[adventurerId]] : [];
-             
-             if (!advMods.includes(slot)) {
-                 advMods.push(slot);
-             }
-             
+             if (!advMods.includes(slot)) advMods.push(slot);
              modifiedSlots[adventurerId] = advMods;
              run.modifiedSlots = modifiedSlots;
              newActiveRuns[activeRunIndex] = run;
         }
 
-        return {
-            ...state,
-            adventurers: newAdvs,
-            inventory: [...state.inventory, item],
-            activeRuns: newActiveRuns
-        };
+        return { ...state, adventurers: newAdvs, inventory: [...state.inventory, item], activeRuns: newActiveRuns };
     }
-
     case 'SALVAGE_ITEM': {
         const item = state.inventory.find(i => i.id === action.payload.itemId);
         if (!item) return state;
-
-        return {
-            ...state,
-            gold: state.gold + item.value,
-            inventory: state.inventory.filter(i => i.id !== action.payload.itemId)
-        };
+        return { ...state, gold: state.gold + item.value, inventory: state.inventory.filter(i => i.id !== action.payload.itemId) };
     }
-
     case 'SALVAGE_MANY_ITEMS': {
         const { itemIds } = action.payload;
         const itemsToSalvage = state.inventory.filter(i => itemIds.includes(i.id));
         const totalValue = itemsToSalvage.reduce((sum, i) => sum + i.value, 0);
-
-        return {
-            ...state,
-            gold: state.gold + totalValue,
-            inventory: state.inventory.filter(i => !itemIds.includes(i.id))
-        };
+        return { ...state, gold: state.gold + totalValue, inventory: state.inventory.filter(i => !itemIds.includes(i.id)) };
     }
-
     case 'BUY_UPGRADE': {
         const { upgradeId, cost } = action.payload;
         if (state.gold < cost) return state;
-
-        return {
-            ...state,
-            gold: state.gold - cost,
-            upgrades: {
-                ...state.upgrades,
-                [upgradeId]: (state.upgrades[upgradeId] || 0) + 1
-            }
-        };
+        return { ...state, gold: state.gold - cost, upgrades: { ...state.upgrades, [upgradeId]: (state.upgrades[upgradeId] || 0) + 1 } };
     }
-    
     case 'RECRUIT_ADVENTURER': {
        if (state.gold < action.payload.cost) return state;
-       
-       const newAdv = generateAdventurer(
-           `adv_${Date.now()}`, 
-           `Mercenary ${state.adventurers.length + 1}`
-       );
-
-       return {
-         ...state,
-         gold: state.gold - action.payload.cost,
-         adventurers: [...state.adventurers, newAdv]
-       };
+       const newAdv = generateAdventurer(`adv_${Date.now()}`);
+       return { ...state, gold: state.gold - action.payload.cost, adventurers: [...state.adventurers, newAdv] };
     }
-
     case 'PRESTIGE': {
         const currency = action.payload.currencyAwarded;
-        
-        // Reset everything except prestigeCurrency and prestigeUpgrades
-        // Retain materials? Prompt says "Ascension Interaction... Lifetime gathered materials tracked... Gold resets... Gear resets".
-        // It doesn't explicitly say materials persist in inventory, just tracked.
-        // Usually prestige resets inventory. I'll reset materials for now as is standard, but keeping stats would require a new stats field.
-        // For this iteration, reset materials.
-        
-        return {
-            ...initialState,
-            prestigeCurrency: state.prestigeCurrency + currency,
-            prestigeUpgrades: state.prestigeUpgrades,
-            statistics: {
-                totalGoldEarned: 0,
-                monstersKilled: 0,
-                dungeonsCleared: 0
-            }
-        };
+        return { ...initialState, prestigeCurrency: state.prestigeCurrency + currency, prestigeUpgrades: state.prestigeUpgrades, statistics: { totalGoldEarned: 0, monstersKilled: 0, dungeonsCleared: 0 } };
     }
-
     case 'BUY_PRESTIGE_UPGRADE': {
         const { upgradeId, cost } = action.payload;
         if (state.prestigeCurrency < cost) return state;
-
-        return {
-            ...state,
-            prestigeCurrency: state.prestigeCurrency - cost,
-            prestigeUpgrades: {
-                ...state.prestigeUpgrades,
-                [upgradeId]: (state.prestigeUpgrades[upgradeId] || 0) + 1
-            }
-        };
+        return { ...state, prestigeCurrency: state.prestigeCurrency - cost, prestigeUpgrades: { ...state.prestigeUpgrades, [upgradeId]: (state.prestigeUpgrades[upgradeId] || 0) + 1 } };
     }
-
     case 'ENCHANT_ITEM': {
         const { itemId } = action.payload;
-        
-        // 1. Find Item
         const invIndex = state.inventory.findIndex(i => i.id === itemId);
         let itemToEnchant: Item | null = null;
         let location: 'INVENTORY' | 'EQUIPPED' = 'INVENTORY';
         let advId = '';
         let slot: ItemType | null = null;
 
-        if (invIndex !== -1) {
-            itemToEnchant = { ...state.inventory[invIndex] };
-        } else {
+        if (invIndex !== -1) { itemToEnchant = { ...state.inventory[invIndex] }; } 
+        else {
             for (const adv of state.adventurers) {
-                if (adv.slots.Weapon?.id === itemId) {
-                    itemToEnchant = { ...adv.slots.Weapon };
-                    location = 'EQUIPPED';
-                    advId = adv.id;
-                    slot = ItemType.WEAPON;
-                    break;
-                }
-                if (adv.slots.Armor?.id === itemId) {
-                    itemToEnchant = { ...adv.slots.Armor };
-                    location = 'EQUIPPED';
-                    advId = adv.id;
-                    slot = ItemType.ARMOR;
-                    break;
-                }
-                if (adv.slots.Trinket?.id === itemId) {
-                    itemToEnchant = { ...adv.slots.Trinket };
-                    location = 'EQUIPPED';
-                    advId = adv.id;
-                    slot = ItemType.TRINKET;
-                    break;
-                }
+                if (adv.slots.Weapon?.id === itemId) { itemToEnchant = { ...adv.slots.Weapon }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.WEAPON; break; }
+                if (adv.slots.Armor?.id === itemId) { itemToEnchant = { ...adv.slots.Armor }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.ARMOR; break; }
+                if (adv.slots.Trinket?.id === itemId) { itemToEnchant = { ...adv.slots.Trinket }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.TRINKET; break; }
             }
         }
-
         if (!itemToEnchant) return state;
-
-        // 2. Validate Constraints
         const maxStats = MAX_STATS_BY_RARITY[itemToEnchant.rarity];
         if (itemToEnchant.stats.length >= maxStats) return state;
-
-        // 3. Calculate Cost (Centralized Logic)
         const cost = calculateItemUpgradeCost(itemToEnchant, 'ENCHANT');
         if (state.gold < cost) return state;
 
-        // 4. Perform Action
         const existingNames = itemToEnchant.stats.map(s => s.name);
         const newStat = generateRandomAffix(itemToEnchant.level, itemToEnchant.rarity, existingNames);
         itemToEnchant.stats = [...itemToEnchant.stats, newStat];
@@ -637,106 +549,62 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         if (location === 'INVENTORY') {
             const newInventory = [...state.inventory];
             newInventory[invIndex] = itemToEnchant;
-            return {
-                ...state,
-                gold: state.gold - cost,
-                inventory: newInventory
-            };
+            return { ...state, gold: state.gold - cost, inventory: newInventory };
         } else if (location === 'EQUIPPED' && slot) {
              const advIndex = state.adventurers.findIndex(a => a.id === advId);
              if (advIndex === -1) return state;
-
              const newAdv = { ...state.adventurers[advIndex] };
              newAdv.slots = { ...newAdv.slots, [slot]: itemToEnchant };
-             
              const newAdvs = [...state.adventurers];
              newAdvs[advIndex] = newAdv;
-             
-             return {
-                 ...state,
-                 gold: state.gold - cost,
-                 adventurers: newAdvs
-             };
+             return { ...state, gold: state.gold - cost, adventurers: newAdvs };
         }
-        
         return state;
     }
-
     case 'REROLL_STAT': {
         const { itemId, statIndex } = action.payload;
-        
-        // 1. Find Item
         const invIndex = state.inventory.findIndex(i => i.id === itemId);
         let itemToReroll: Item | null = null;
         let location: 'INVENTORY' | 'EQUIPPED' = 'INVENTORY';
         let advId = '';
         let slot: ItemType | null = null;
 
-        if (invIndex !== -1) {
-            itemToReroll = { ...state.inventory[invIndex] };
-        } else {
+        if (invIndex !== -1) { itemToReroll = { ...state.inventory[invIndex] }; } 
+        else {
              for (const adv of state.adventurers) {
-                if (adv.slots.Weapon?.id === itemId) {
-                    itemToReroll = { ...adv.slots.Weapon };
-                    location = 'EQUIPPED';
-                    advId = adv.id;
-                    slot = ItemType.WEAPON;
-                    break;
-                }
-                if (adv.slots.Armor?.id === itemId) {
-                    itemToReroll = { ...adv.slots.Armor };
-                    location = 'EQUIPPED';
-                    advId = adv.id;
-                    slot = ItemType.ARMOR;
-                    break;
-                }
-                if (adv.slots.Trinket?.id === itemId) {
-                    itemToReroll = { ...adv.slots.Trinket };
-                    location = 'EQUIPPED';
-                    advId = adv.id;
-                    slot = ItemType.TRINKET;
-                    break;
-                }
+                if (adv.slots.Weapon?.id === itemId) { itemToReroll = { ...adv.slots.Weapon }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.WEAPON; break; }
+                if (adv.slots.Armor?.id === itemId) { itemToReroll = { ...adv.slots.Armor }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.ARMOR; break; }
+                if (adv.slots.Trinket?.id === itemId) { itemToReroll = { ...adv.slots.Trinket }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.TRINKET; break; }
             }
         }
 
         if (!itemToReroll) return state;
         if (statIndex < 0 || statIndex >= itemToReroll.stats.length) return state;
-
-        // 2. Calculate Cost (Centralized Logic)
         const cost = calculateItemUpgradeCost(itemToReroll, 'REROLL');
         if (state.gold < cost) return state;
 
-        // 3. Perform Reroll Logic
         const oldStat = itemToReroll.stats[statIndex];
         const newTier = rollStatTier();
         const tierMultiplier = TIER_MULTIPLIERS[newTier];
         let newStat;
 
         if (statIndex === 0) {
-            // Main Stat Reroll
-            // Formula: baseBudget * TierMult
             const rarityMultiplier = ITEM_RARITY_MULTIPLIERS[itemToReroll.rarity] || 1;
-            const baseBudget = 3 * itemToReroll.level * rarityMultiplier; // Matches getStatBudget without crafter bonus for rerolls (simple)
+            const baseBudget = 3 * itemToReroll.level * rarityMultiplier;
             const effectiveBudget = baseBudget * tierMultiplier;
-            
             let val = 1;
-            // Matches generateItem multipliers
             if (oldStat.name === 'Damage') {
-                const multiplier = itemToReroll.type === ItemType.WEAPON ? 1.0 : 0.5; // Weapon vs Trinket
+                const multiplier = itemToReroll.type === ItemType.WEAPON ? 1.0 : 0.5;
                 val = Math.max(1, Math.round(effectiveBudget * multiplier));
             } else if (oldStat.name === 'Health') {
-                const multiplier = itemToReroll.type === ItemType.ARMOR ? 5.0 : 2.5; // Armor vs Trinket
+                const multiplier = itemToReroll.type === ItemType.ARMOR ? 5.0 : 2.5;
                 val = Math.max(5, Math.round(effectiveBudget * multiplier));
             }
-            
             newStat = { ...oldStat, value: val, tier: newTier };
         } else {
-            // Affix Reroll
             const existingNames = itemToReroll.stats.filter((_, idx) => idx !== statIndex).map(s => s.name);
             newStat = generateRandomAffix(itemToReroll.level, itemToReroll.rarity, existingNames);
         }
-
         const newStats = [...itemToReroll.stats];
         newStats[statIndex] = newStat;
         itemToReroll.stats = newStats;
@@ -744,61 +612,58 @@ const gameReducer = (state: GameState, action: Action): GameState => {
         if (location === 'INVENTORY') {
             const newInventory = [...state.inventory];
             newInventory[invIndex] = itemToReroll;
-            return {
-                ...state,
-                gold: state.gold - cost,
-                inventory: newInventory
-            };
+            return { ...state, gold: state.gold - cost, inventory: newInventory };
         } else if (location === 'EQUIPPED' && slot) {
              const advIndex = state.adventurers.findIndex(a => a.id === advId);
              if (advIndex === -1) return state;
-
              const newAdv = { ...state.adventurers[advIndex] };
              newAdv.slots = { ...newAdv.slots, [slot]: itemToReroll };
-             
              const newAdvs = [...state.adventurers];
              newAdvs[advIndex] = newAdv;
-             
-             return {
-                 ...state,
-                 gold: state.gold - cost,
-                 adventurers: newAdvs
-             };
+             return { ...state, gold: state.gold - cost, adventurers: newAdvs };
         }
-
         return state;
     }
-
     case 'UNLOCK_SKILL': {
         const { adventurerId, skillId } = action.payload;
         const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
         if (advIndex === -1) return state;
 
         const adv = { ...state.adventurers[advIndex] };
-        
-        // Find specific node cost
         const node = adv.skillTree?.find(n => n.id === skillId);
         if (!node) return state;
 
         const cost = node.cost || 1;
-
-        // Validation handled in UI but double check
         if (adv.skillPoints < cost) return state;
         if (adv.unlockedSkills.includes(skillId)) return state;
 
-        // Pay cost
+        if (node.exclusiveGroup) {
+            const hasExclusiveSibling = adv.unlockedSkills.some(id => {
+                const sibling = adv.skillTree?.find(n => n.id === id);
+                return sibling && sibling.exclusiveGroup === node.exclusiveGroup;
+            });
+            if (hasExclusiveSibling) return state;
+        }
+
         adv.skillPoints -= cost;
         adv.unlockedSkills = [...adv.unlockedSkills, skillId];
-
         const newAdvs = [...state.adventurers];
         newAdvs[advIndex] = adv;
 
-        return {
-            ...state,
-            adventurers: newAdvs
-        };
+        return { ...state, adventurers: newAdvs };
     }
+    case 'RENAME_ADVENTURER': {
+        const { adventurerId, newName } = action.payload;
+        if (!newName.trim()) return state;
+        
+        const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
+        if (advIndex === -1) return state;
 
+        const newAdvs = [...state.adventurers];
+        newAdvs[advIndex] = { ...newAdvs[advIndex], name: newName.trim() };
+        
+        return { ...state, adventurers: newAdvs };
+    }
     default:
       return state;
   }
@@ -822,6 +687,7 @@ interface GameContextProps {
   enchantItem: (itemId: string) => void;
   rerollStat: (itemId: string, statIndex: number) => void;
   unlockSkill: (adventurerId: string, skillId: string) => void;
+  renameAdventurer: (adventurerId: string, newName: string) => void;
 }
 
 const GameContext = createContext<GameContextProps | undefined>(undefined);
@@ -863,7 +729,19 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
                 // V11: Unique Skill Tree Migration
                 if (!adv.skillTree) {
-                    adv.skillTree = generateSkillTree(adv.role);
+                    const { tree, archetype } = generateSkillTree(adv.role);
+                    adv.skillTree = tree;
+                    adv.archetype = archetype;
+                }
+                // V12: Archetype Migration (Update old trees if needed, or simple assign empty archetype name if missing)
+                if (!adv.archetype && adv.skillTree) {
+                    adv.archetype = "Mercenary"; // Legacy fallback
+                }
+
+                // V13: Name/Title Migration
+                if (!adv.title) {
+                    const titles = TITLES_BY_ROLE[adv.role] || ["Mercenary"];
+                    adv.title = titles[0]; // Default to basic title if migrating
                 }
 
                 // Patch equipped items for Tiers
@@ -899,11 +777,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // V9 Migration: Materials
         if (!parsed.materials) parsed.materials = {};
 
-        // Clean up offline props if they exist in save
         delete parsed.offlineSetup;
         delete parsed.offlineReport;
 
-        // V5 logic...
         if (parsed.activeRuns) {
             parsed.activeRuns = parsed.activeRuns.map((run: any) => {
                 if (run.adventurerId && !run.adventurerIds) {
@@ -914,15 +790,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (run.runsRemaining === undefined) {
                     return { ...run, runsRemaining: 1, totalRuns: 1 };
                 }
-                // V6 Logic: Ensure Snapshot exists
                 if (!run.snapshot) {
-                     // Legacy migration
                 }
-                // V7 Logic: Ensure AdventurerState exists for pending logic
                 if (!run.adventurerState) {
                     run.adventurerState = {};
                 }
-                // V8 Logic: Ensure modifiedSlots exists
                 if (!run.modifiedSlots) {
                     run.modifiedSlots = {};
                 }
@@ -1082,8 +954,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       dispatch({ type: 'UNLOCK_SKILL', payload: { adventurerId, skillId } });
   }, []);
 
+  const renameAdventurer = useCallback((adventurerId: string, newName: string) => {
+      dispatch({ type: 'RENAME_ADVENTURER', payload: { adventurerId, newName } });
+  }, []);
+
   return (
-    <GameContext.Provider value={{ state, startDungeon, cancelDungeon, stopRepeat, dismissReport, equipItem, unequipItem, salvageItem, salvageManyItems, buyUpgrade, recruitAdventurer, importSave, doPrestige, buyPrestigeUpgrade, enchantItem, rerollStat, unlockSkill }}>
+    <GameContext.Provider value={{ state, startDungeon, cancelDungeon, stopRepeat, dismissReport, equipItem, unequipItem, salvageItem, salvageManyItems, buyUpgrade, recruitAdventurer, importSave, doPrestige, buyPrestigeUpgrade, enchantItem, rerollStat, unlockSkill, renameAdventurer }}>
       {children}
     </GameContext.Provider>
   );

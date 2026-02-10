@@ -4,7 +4,7 @@ import { useGame } from '../services/GameContext';
 import { DUNGEONS, ENEMIES, MATERIALS } from '../constants';
 import { calculateAdventurerPower, calculateConservativePower, calculateDungeonDuration, calculatePartyDps, formatNumber } from '../utils/gameMath';
 import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Fish } from 'lucide-react';
-import { ContractType } from '../types';
+import { ContractType, AdventurerRole } from '../types';
 
 export const DungeonList: React.FC = () => {
   const { state, startDungeon, cancelDungeon, stopRepeat } = useGame();
@@ -58,6 +58,15 @@ export const DungeonList: React.FC = () => {
   };
 
   const filteredDungeons = DUNGEONS.filter(d => d.type === activeTab);
+
+  const getRoleColor = (role: AdventurerRole) => {
+      switch(role) {
+          case AdventurerRole.WARRIOR: return 'bg-red-500';
+          case AdventurerRole.ROGUE: return 'bg-emerald-500';
+          case AdventurerRole.MAGE: return 'bg-blue-500';
+          default: return 'bg-slate-500';
+      }
+  };
 
   return (
     <div className="space-y-6">
@@ -211,28 +220,41 @@ export const DungeonList: React.FC = () => {
                                    if(!isCombat) runEstKills = Math.max(1, Math.floor(runEstKills/2));
 
                                    return (
-                                       <div key={run.id} className="bg-slate-900/50 rounded p-2 border border-slate-700/50 flex items-center gap-3 relative overflow-hidden group/run">
+                                       <div key={run.id} className="bg-slate-900/50 rounded p-2 border border-slate-700/50 flex items-start gap-3 relative overflow-hidden group/run">
                                            {/* Progress Bar Background */}
                                            <div className="absolute bottom-0 left-0 h-0.5 bg-indigo-500/30 w-full">
                                                 <div className="h-full bg-indigo-500 transition-all duration-200" style={{ width: `${progress}%` }}></div>
                                            </div>
                                            
                                            <div className="flex-1 min-w-0">
-                                               <div className="flex items-center gap-2 text-sm text-slate-300">
-                                                   <Users size={12} className="text-indigo-400"/>
-                                                   <span className="truncate">
-                                                       {activeAdventurers.map(a => `${a.name} (Lvl ${a.level}, ${formatNumber(calculateConservativePower(a, state))} Pwr)`).join(', ')}
-                                                   </span>
+                                               {/* Vertical Adventurer List */}
+                                               <div className="mb-2">
+                                                   <div className="flex items-center gap-2 mb-1">
+                                                       <Users size={12} className="text-indigo-400"/>
+                                                       <span className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider">Assigned Team</span>
+                                                   </div>
+                                                   <div className="flex flex-col gap-1 pl-1">
+                                                       {activeAdventurers.map(a => (
+                                                           <div key={a.id} className="flex items-center gap-2 text-xs sm:text-sm text-slate-300">
+                                                               <div className={`w-1.5 h-1.5 rounded-full ${getRoleColor(a.role)}`}></div>
+                                                               <span className="font-bold text-slate-200">{a.name}</span>
+                                                               <span className="text-slate-500 text-[10px] sm:text-xs">
+                                                                   (Lvl {a.level}, {formatNumber(calculateConservativePower(a, state))} Pwr, {a.role})
+                                                               </span>
+                                                           </div>
+                                                       ))}
+                                                   </div>
                                                </div>
-                                               <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+
+                                               <div className="flex items-center gap-2 text-[10px] text-slate-500 pt-1 border-t border-slate-800/50">
                                                    <Swords size={10} /> Total: {formatNumber(runDps)} Atk Pwr
                                                    <span className="text-slate-700">|</span>
                                                    {isCombat ? <Skull size={10} /> : <Leaf size={10} />} ~{runEstKills} {isCombat ? 'Kills' : 'Yield'}/Run
                                                </div>
                                            </div>
                                            
-                                           <div className="flex items-center gap-2">
-                                                <div className="text-xs font-mono text-slate-500 flex items-center gap-2 mr-2">
+                                           <div className="flex flex-col items-end gap-2 mt-1 z-10">
+                                                <div className="text-xs font-mono text-slate-500 flex items-center gap-2">
                                                     {isInfinite ? (
                                                         <span className="text-indigo-400 flex items-center gap-1 font-bold">
                                                             <Repeat size={10} className="animate-spin-slow" /> Auto
@@ -244,33 +266,27 @@ export const DungeonList: React.FC = () => {
                                                     )}
                                                 </div>
                                                 
-                                                {/* Stop Loop Button (Graceful Finish) */}
-                                                {isInfinite && (
+                                                <div className="flex gap-1">
+                                                    {/* Stop Loop Button */}
+                                                    {isInfinite && (
+                                                        <button 
+                                                            onClick={() => stopRepeat(run.id)}
+                                                            className="p-1 rounded bg-amber-900/20 border border-amber-700/50 text-amber-400 hover:bg-amber-900/40 text-xs transition-colors"
+                                                            title="Finish this run and stop repeating"
+                                                        >
+                                                            <Square size={12} fill="currentColor" />
+                                                        </button>
+                                                    )}
+
+                                                    {/* Force Cancel Button */}
                                                     <button 
-                                                        onClick={() => stopRepeat(run.id)}
-                                                        className="px-2 py-1 rounded bg-amber-900/20 border border-amber-700/50 text-amber-400 hover:bg-amber-900/40 text-xs font-bold flex items-center gap-1 transition-colors"
-                                                        title="Finish this run and stop repeating"
+                                                        onClick={() => cancelDungeon(run.id)}
+                                                        className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-900/10 transition-colors"
+                                                        title="Abort Immediately"
                                                     >
-                                                        <Square size={10} fill="currentColor" />
-                                                        Stop Loop
+                                                        <X size={14} />
                                                     </button>
-                                                )}
-
-                                                {/* Status Badge when stopping/single run */}
-                                                {!isInfinite && (
-                                                     <span className="text-[10px] uppercase font-bold text-slate-500 bg-slate-800 px-2 py-1 rounded border border-slate-700">
-                                                        Finishing...
-                                                     </span>
-                                                )}
-
-                                                {/* Force Cancel Button (Abort) */}
-                                                <button 
-                                                    onClick={() => cancelDungeon(run.id)}
-                                                    className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-red-900/10 transition-colors ml-1"
-                                                    title="Abort Immediately (No Rewards)"
-                                                >
-                                                    <X size={14} />
-                                                </button>
+                                                </div>
                                            </div>
                                        </div>
                                    );

@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Item, ItemType, Rarity, Adventurer } from '../types';
-import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual, calculateItemRating, calculateConservativePower } from '../utils/gameMath';
-import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight } from 'lucide-react';
+import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual, calculateItemRating, calculateConservativePower, getActiveModifiers } from '../utils/gameMath';
+import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight, Lock, AlertTriangle } from 'lucide-react';
 import { RARITY_COLORS, MAX_STATS_BY_RARITY, ADVENTURER_RARITY_MULTIPLIERS, STAT_TIER_COLORS } from '../constants';
 import { ItemIcon } from './ItemIcon';
 
@@ -15,6 +15,7 @@ interface ItemDetailsModalProps {
 export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClose }) => {
     const { state, equipItem, unequipItem, salvageItem, enchantItem, rerollStat } = useGame();
     const [tab, setTab] = useState<'MANAGE' | 'CRAFT'>('MANAGE');
+    const [isConfirmingSalvage, setIsConfirmingSalvage] = useState(false);
 
     if (!item) return null;
 
@@ -218,7 +219,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                 const advBusy = state.activeRuns.some(r => r.adventurerIds.includes(adv.id));
                                                 const compatible = !currentItem.classRestriction || currentItem.classRestriction.includes(adv.role);
                                                 const currentEquipped = adv.slots[currentItem.type];
-                                                
+                                                const activeModifiers = getActiveModifiers([adv.id], state);
+                                                const isWeaponMaster = activeModifiers.includes('WEAPON_MASTER');
+                                                const isSlotDisabled = currentItem.type === ItemType.TRINKET && isWeaponMaster;
+
                                                 // Check pending logic for list items if they are busy
                                                 let advPending = false;
                                                 if(advBusy) {
@@ -228,8 +232,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                         if (snapshotAdv) {
                                                             const snapshotItem = snapshotAdv.slots[currentItem.type];
                                                             
-                                                            // Logic: If I equip THIS item, is it different from what is currently fighting?
-                                                            // OR if this slot is already modified
                                                             const isModified = run.modifiedSlots?.[adv.id]?.includes(currentItem.type);
                                                             if (isModified || !areItemsEqual(currentItem, snapshotItem)) {
                                                                 advPending = true;
@@ -245,10 +247,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                             equipItem(adv.id, currentItem);
                                                             onClose();
                                                         }}
-                                                        disabled={!compatible}
+                                                        disabled={!compatible || isSlotDisabled}
                                                         className={`
                                                             flex flex-col p-3 rounded border text-left transition-all
-                                                            ${!compatible 
+                                                            ${!compatible || isSlotDisabled
                                                                 ? 'bg-slate-900/50 text-slate-600 border-slate-800 opacity-60' 
                                                                 : 'bg-slate-800 text-slate-300 border-slate-700 hover:border-indigo-500 hover:bg-slate-700'
                                                             }
@@ -257,8 +259,9 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                         <div className="flex justify-between items-center w-full mb-2">
                                                             <span className="text-sm font-bold flex items-center gap-2">
                                                                 {adv.name}
-                                                                {compatible && !advBusy && <Check size={14} className="text-indigo-500" />}
+                                                                {compatible && !isSlotDisabled && !advBusy && <Check size={14} className="text-indigo-500" />}
                                                                 {advBusy && advPending && <RefreshCw size={12} className="text-amber-500" />}
+                                                                {isSlotDisabled && <Lock size={12} className="text-slate-500" />}
                                                             </span>
                                                             <span className="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono">
                                                                 {calculateConservativePower(adv, state)} PWR
@@ -291,8 +294,9 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                         
                                                         {/* Status Messages */}
                                                         <div className="flex gap-2 mt-2 justify-end">
+                                                            {isSlotDisabled && <span className="text-[10px] text-red-500 font-bold uppercase">Locked (Weapon Master)</span>}
                                                             {!compatible && <span className="text-[10px] text-red-500 font-bold uppercase">{adv.role} Only</span>}
-                                                            {advBusy && (
+                                                            {advBusy && !isSlotDisabled && (
                                                                 advPending ? (
                                                                     <span className="text-[10px] text-amber-500 font-bold uppercase flex items-center gap-1"><RefreshCw size={10} /> Queued</span>
                                                                 ) : (
@@ -307,18 +311,42 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                     </div>
 
                                     {/* Salvage */}
-                                    <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
-                                        <div className="text-sm text-slate-400">Scrap Value: <span className="text-yellow-500 font-mono font-bold">{currentItem.value}g</span></div>
-                                        <button
-                                            onClick={() => {
-                                                salvageItem(currentItem.id);
-                                                onClose();
-                                            }}
-                                            className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-300 border border-red-900/30 rounded text-sm font-bold flex items-center gap-2"
-                                        >
-                                            <Trash2 size={16} /> Salvage
-                                        </button>
-                                    </div>
+                                    {isConfirmingSalvage ? (
+                                        <div className="pt-4 border-t border-slate-800 animate-in fade-in slide-in-from-bottom-2">
+                                            <div className="flex items-center justify-center gap-2 text-sm font-bold text-red-400 mb-2">
+                                                <AlertTriangle size={16} />
+                                                Confirm Destruction?
+                                            </div>
+                                            <p className="text-xs text-slate-500 text-center mb-3">This item will be destroyed permanently.</p>
+                                            <div className="flex gap-2">
+                                                <button 
+                                                    onClick={() => setIsConfirmingSalvage(false)}
+                                                    className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-bold transition-colors text-xs uppercase tracking-wide"
+                                                >
+                                                    Cancel
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        salvageItem(currentItem.id);
+                                                        onClose();
+                                                    }}
+                                                    className="flex-1 py-2 bg-red-600 hover:bg-red-500 text-white shadow-lg shadow-red-900/20 rounded font-bold transition-colors flex items-center justify-center gap-2 text-xs uppercase tracking-wide"
+                                                >
+                                                    <Trash2 size={14} /> Confirm
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
+                                            <div className="text-sm text-slate-400">Scrap Value: <span className="text-yellow-500 font-mono font-bold">{currentItem.value}g</span></div>
+                                            <button
+                                                onClick={() => setIsConfirmingSalvage(true)}
+                                                className="px-4 py-2 bg-red-900/20 hover:bg-red-900/40 text-red-300 border border-red-900/30 rounded text-sm font-bold flex items-center gap-2 transition-all"
+                                            >
+                                                <Trash2 size={16} /> Salvage
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
