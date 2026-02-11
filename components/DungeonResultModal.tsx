@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { RARITY_COLORS } from '../constants';
-import { Coins, Star, X, CheckCircle, Skull, Box } from 'lucide-react';
+import { Coins, Star, X, CheckCircle, Skull, Box, Filter } from 'lucide-react';
 import { formatNumber } from '../utils/gameMath';
 import { ItemIcon } from './ItemIcon';
 
@@ -19,7 +19,7 @@ export const DungeonResultModal: React.FC = () => {
 
     const timer = setTimeout(() => {
         dismissReport(report.id);
-    }, 3000);
+    }, 1000); // Changed from 4000ms to 1000ms (1s) as requested
 
     return () => clearTimeout(timer);
   }, [report, isPaused, dismissReport]);
@@ -44,7 +44,7 @@ export const DungeonResultModal: React.FC = () => {
                         to { transform: scaleX(1); }
                     }
                     .animate-progress {
-                        animation: progress 3s linear forwards;
+                        animation: progress 1s linear forwards;
                     }
                 `}</style>
             </div>
@@ -96,6 +96,14 @@ export const DungeonResultModal: React.FC = () => {
                                         +{report.itemsFound.length - 2} more items...
                                     </div>
                                 )}
+                            </div>
+                        )}
+
+                        {/* Auto-Salvage Report */}
+                        {report.autoSalvagedCount > 0 && (
+                            <div className="mt-2 text-[10px] text-slate-400 flex items-center gap-1.5 bg-slate-950/30 px-1.5 py-1 rounded border border-dashed border-slate-800">
+                                <Filter size={10} />
+                                <span>Filter: {report.autoSalvagedCount} salvaged (+{report.autoSalvagedGold}g)</span>
                             </div>
                         )}
                     </div>

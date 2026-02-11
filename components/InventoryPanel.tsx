@@ -3,15 +3,17 @@ import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Item, ItemType, Rarity } from '../types';
 import { formatNumber } from '../utils/gameMath';
-import { Trash2, X, CheckSquare, Layers, Box, CheckCircle, AlertTriangle, Package } from 'lucide-react';
-import { RARITY_COLORS, RARITY_BG_COLORS, INVENTORY_SIZE, MATERIALS } from '../constants';
+import { Trash2, X, CheckSquare, Layers, Box, CheckCircle, AlertTriangle, Package, Filter, Lock } from 'lucide-react';
+import { RARITY_COLORS, RARITY_BG_COLORS, INVENTORY_SIZE, MATERIALS, LOOT_FILTER_UNLOCK_COST } from '../constants';
 import { ItemIcon } from './ItemIcon';
 import { ItemDetailsModal } from './ItemDetailsModal';
+import { LootFilterModal } from './LootFilterModal';
 
 export const InventoryPanel: React.FC = () => {
-  const { state, salvageManyItems } = useGame();
+  const { state, salvageManyItems, unlockLootFilter } = useGame();
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [activeTab, setActiveTab] = useState<'EQUIPMENT' | 'MATERIALS'>('EQUIPMENT');
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   
   // Bulk Mode States (Equipment Only)
   const [isBulkMode, setIsBulkMode] = useState(false);
@@ -68,6 +70,10 @@ export const InventoryPanel: React.FC = () => {
           />
       )}
 
+      {isFilterModalOpen && (
+          <LootFilterModal onClose={() => setIsFilterModalOpen(false)} />
+      )}
+
       {/* Header & Tabs */}
       <div>
         <h1 className="text-2xl font-bold text-slate-100 mb-6">Inventory</h1>
@@ -92,7 +98,7 @@ export const InventoryPanel: React.FC = () => {
       {activeTab === 'EQUIPMENT' && (
         <div className="animate-in fade-in slide-in-from-left-4 duration-300 space-y-6">
             <div className={`p-4 rounded-xl border transition-colors ${isBulkMode ? 'bg-red-900/10 border-red-900/30' : 'bg-slate-900/30 border-slate-800/50'}`}>
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
                     <div className="flex items-center gap-3">
                          <div className={`text-xs font-mono font-bold px-2 py-1 rounded border flex items-center gap-2 ${state.inventory.length >= INVENTORY_SIZE ? 'bg-red-900/50 text-red-400 border-red-800' : 'bg-slate-900 text-slate-300 border-slate-800'}`}>
                             <Package size={14} />
@@ -101,6 +107,27 @@ export const InventoryPanel: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
+                        {/* Loot Filter Button */}
+                        {state.lootFilter.unlocked ? (
+                            <button
+                                onClick={() => setIsFilterModalOpen(true)}
+                                className={`flex items-center gap-1 px-3 py-1.5 rounded text-xs font-bold transition-all border ${state.lootFilter.enabled ? 'bg-indigo-900/30 text-indigo-300 border-indigo-500/30 hover:bg-indigo-900/50' : 'bg-slate-800 text-slate-400 border-slate-600 hover:bg-slate-700'}`}
+                            >
+                                <Filter size={14} /> Filter {state.lootFilter.enabled ? 'On' : 'Off'}
+                            </button>
+                        ) : (
+                            <button
+                                onClick={unlockLootFilter}
+                                disabled={state.gold < LOOT_FILTER_UNLOCK_COST}
+                                className={`flex items-center gap-1 px-3 py-1.5 rounded text-xs font-bold transition-all border ${state.gold >= LOOT_FILTER_UNLOCK_COST ? 'bg-yellow-900/20 text-yellow-500 border-yellow-700/50 hover:bg-yellow-900/40' : 'bg-slate-900 text-slate-500 border-slate-800 cursor-not-allowed'}`}
+                                title={`Unlock Auto-Salvage Filter for ${formatNumber(LOOT_FILTER_UNLOCK_COST)}g`}
+                            >
+                                <Lock size={12} /> Unlock Filter ({formatNumber(LOOT_FILTER_UNLOCK_COST)}g)
+                            </button>
+                        )}
+
+                        <div className="h-4 w-px bg-slate-700 mx-2"></div>
+
                         {isBulkMode && (
                             <button
                                 onClick={handleSelectAll}

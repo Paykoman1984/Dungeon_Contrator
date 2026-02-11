@@ -3,6 +3,7 @@ import { Dungeon, Rarity, Upgrade, AdventurerRole, Skill, Enemy, WeaponType, Pre
 
 export const INITIAL_GOLD = 0;
 export const INVENTORY_SIZE = 50;
+export const LOOT_FILTER_UNLOCK_COST = 2500;
 
 export const RARITY_COLORS: Record<Rarity, string> = {
   [Rarity.COMMON]: 'text-slate-400',
@@ -18,6 +19,14 @@ export const RARITY_BG_COLORS: Record<Rarity, string> = {
   [Rarity.RARE]: 'bg-blue-900/30',
   [Rarity.EPIC]: 'bg-purple-900/30',
   [Rarity.LEGENDARY]: 'bg-orange-900/30',
+};
+
+export const RARITY_ORDER: Record<Rarity, number> = {
+    [Rarity.COMMON]: 0,
+    [Rarity.UNCOMMON]: 1,
+    [Rarity.RARE]: 2,
+    [Rarity.EPIC]: 3,
+    [Rarity.LEGENDARY]: 4,
 };
 
 // Common=2 (1 Main + 1), Uncommon=3, Rare=4, Epic=5, Legendary=6

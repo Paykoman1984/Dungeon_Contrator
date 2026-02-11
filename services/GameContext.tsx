@@ -1,965 +1,828 @@
 
-import React, { createContext, useContext, useEffect, useReducer, useRef, useCallback } from 'react';
-import { GameState, Item, Adventurer, Dungeon, ActiveRun, ItemType, DungeonReport, AdventurerRole, Rarity, RunSnapshot, ContractType } from '../types';
-import { DUNGEONS, INITIAL_GOLD, UPGRADES, INVENTORY_SIZE, ROLE_CONFIG, ENEMIES, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, ENCHANT_COST_BASE, REROLL_COST_BASE, ADVENTURER_RARITY_MULTIPLIERS, TIER_MULTIPLIERS, MATERIALS, ADVENTURER_TRAITS, TITLES_BY_ROLE } from '../constants';
-import { calculateAdventurerPower, calculateDungeonDuration, generateItem, generateAdventurer, calculatePartyDps, calculatePartyStat, calculatePrestigeGain, generateRandomAffix, rollStatTier, ITEM_RARITY_MULTIPLIERS, calculateItemUpgradeCost, calculateRunSnapshot, calculateTotalSkillPoints, generateSkillTree } from '../utils/gameMath';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { 
+    GameState, Adventurer, Item, ItemType, Rarity, ActiveRun, 
+    DungeonReport, LootFilterSettings, ContractType, RunSnapshot, AdventurerRole
+} from '../types';
+import { 
+    INITIAL_GOLD, INVENTORY_SIZE, LOOT_FILTER_UNLOCK_COST, RARITY_ORDER, 
+    UPGRADES, PRESTIGE_UPGRADES, DUNGEONS, ENEMIES, MATERIALS 
+} from '../constants';
+import { 
+    generateAdventurer, generateItem, calculateRunSnapshot, 
+    calculateDungeonDuration, calculateItemUpgradeCost, 
+    calculateAdventurerPower, getStatBudget, generateRandomAffix, rollStatTier, generateSkillTree
+} from '../utils/gameMath';
 
-const STORAGE_KEY = 'idle_dungeon_contractor_save_v1';
-
-// Initial State
-const initialAdventurer = generateAdventurer('adv_1');
-initialAdventurer.role = AdventurerRole.WARRIOR;
-initialAdventurer.rarity = Rarity.COMMON;
-initialAdventurer.baseStats = {
-    damage: ROLE_CONFIG[AdventurerRole.WARRIOR].baseDmg,
-    health: ROLE_CONFIG[AdventurerRole.WARRIOR].baseHp,
-    speed: ROLE_CONFIG[AdventurerRole.WARRIOR].baseSpeed,
-    critChance: ROLE_CONFIG[AdventurerRole.WARRIOR].baseCrit
-};
-
-const initialState: GameState = {
+const INITIAL_STATE: GameState = {
   gold: INITIAL_GOLD,
   prestigeCurrency: 0,
-  adventurers: [initialAdventurer],
+  adventurers: [],
   inventory: [],
-  materials: {}, // New field
+  materials: {},
   activeRuns: [],
-  unlockedDungeons: ['rat_cellar'],
+  unlockedDungeons: ['rat_cellar', 'whispering_woods'],
   upgrades: {},
   prestigeUpgrades: {},
+  lootFilter: {
+      unlocked: false,
+      enabled: false,
+      minRarity: Rarity.COMMON,
+      keepTypes: [ItemType.WEAPON, ItemType.ARMOR, ItemType.TRINKET],
+      matchAnyStat: []
+  },
   lastParties: {},
   recentReports: [],
   lastSaveTime: Date.now(),
   statistics: {
     totalGoldEarned: 0,
     monstersKilled: 0,
-    dungeonsCleared: 0,
-  },
-};
-
-type Action =
-  | { type: 'LOAD_GAME'; payload: GameState }
-  | { type: 'IMPORT_SAVE'; payload: GameState }
-  | { type: 'TICK'; payload: { currentTime: number } }
-  | { type: 'START_DUNGEON'; payload: { dungeonId: string; adventurerIds: string[]; autoRepeat: boolean } }
-  | { type: 'CANCEL_DUNGEON'; payload: { runId: string } }
-  | { type: 'STOP_REPEAT'; payload: { runId: string } }
-  | { type: 'COMPLETE_DUNGEON'; payload: { runId: string; success: boolean, kills: number } }
-  | { type: 'DISMISS_REPORT'; payload: { reportId: string } }
-  | { type: 'EQUIP_ITEM'; payload: { adventurerId: string; item: Item } }
-  | { type: 'UNEQUIP_ITEM'; payload: { adventurerId: string; slot: ItemType } }
-  | { type: 'SALVAGE_ITEM'; payload: { itemId: string } }
-  | { type: 'SALVAGE_MANY_ITEMS'; payload: { itemIds: string[] } }
-  | { type: 'BUY_UPGRADE'; payload: { upgradeId: string; cost: number } }
-  | { type: 'RECRUIT_ADVENTURER'; payload: { cost: number } }
-  | { type: 'PRESTIGE'; payload: { currencyAwarded: number } }
-  | { type: 'BUY_PRESTIGE_UPGRADE'; payload: { upgradeId: string; cost: number } }
-  | { type: 'ENCHANT_ITEM'; payload: { itemId: string } }
-  | { type: 'REROLL_STAT'; payload: { itemId: string; statIndex: number } }
-  | { type: 'UNLOCK_SKILL'; payload: { adventurerId: string; skillId: string } }
-  | { type: 'RENAME_ADVENTURER'; payload: { adventurerId: string; newName: string } };
-
-const gameReducer = (state: GameState, action: Action): GameState => {
-  switch (action.type) {
-    case 'LOAD_GAME': {
-      return { ...action.payload, lastSaveTime: Date.now() };
-    }
-
-    case 'IMPORT_SAVE': {
-        const imported = action.payload;
-        // Ensure new fields exist on imported saves
-        if(!imported.materials) imported.materials = {};
-        if(imported.adventurers) {
-            imported.adventurers = imported.adventurers.map(a => {
-                 // Hybrid System Migration
-                 if (!a.traitId) {
-                     const trait = ADVENTURER_TRAITS[Math.floor(Math.random() * ADVENTURER_TRAITS.length)];
-                     a.traitId = trait.id;
-                 }
-                 if (a.skillPoints === undefined) {
-                     // Recalculate skill points based on level
-                     a.skillPoints = calculateTotalSkillPoints(a.level);
-                 }
-                 if (!a.unlockedSkills) {
-                     a.unlockedSkills = [];
-                 }
-                 if (!a.skillTree) {
-                     // Generate new tree structure with archetype
-                     const { tree, archetype } = generateSkillTree(a.role);
-                     a.skillTree = tree;
-                     a.archetype = archetype;
-                 }
-                 // Name/Title Migration
-                 if (!a.title) {
-                     const titles = TITLES_BY_ROLE[a.role] || ["Mercenary"];
-                     a.title = titles[0]; // Default to basic title if migrating
-                 }
-
-                 return {
-                    ...a,
-                    gatheringXp: a.gatheringXp || 0,
-                    fishingXp: a.fishingXp || 0
-                 };
-            });
-        }
-        return {
-            ...initialState,
-            ...imported,
-            lastSaveTime: Date.now()
-        };
-    }
-
-    case 'TICK': {
-      const now = action.payload.currentTime;
-      return { ...state, lastSaveTime: now };
-    }
-
-    case 'START_DUNGEON': {
-      // Safety Check: Are these adventurers already busy?
-      const isBusy = action.payload.adventurerIds.some(id => 
-        state.activeRuns.some(r => r.adventurerIds.includes(id))
-      );
-      if (isBusy) return state;
-
-      const dungeon = DUNGEONS.find(d => d.id === action.payload.dungeonId);
-      if (!dungeon) return state;
-      
-      const duration = calculateDungeonDuration(dungeon.durationSeconds, state, action.payload.adventurerIds) * 1000;
-      
-      // Calculate Snapshot
-      const snapshot = calculateRunSnapshot(action.payload.adventurerIds, state);
-
-      // Create Deep Copy of Adventurers for the Run Snapshot
-      const adventurerState: Record<string, Adventurer> = {};
-      action.payload.adventurerIds.forEach(id => {
-          const adv = state.adventurers.find(a => a.id === id);
-          if (adv) {
-              adventurerState[id] = JSON.parse(JSON.stringify(adv));
-          }
-      });
-
-      return {
-        ...state,
-        lastParties: {
-            ...state.lastParties,
-            [action.payload.dungeonId]: action.payload.adventurerIds
-        },
-        activeRuns: [
-          ...state.activeRuns,
-          {
-            id: crypto.randomUUID(),
-            dungeonId: dungeon.id,
-            adventurerIds: action.payload.adventurerIds,
-            startTime: Date.now(),
-            duration: duration,
-            runsRemaining: 1, 
-            totalRuns: 1,     
-            autoRepeat: action.payload.autoRepeat,
-            snapshot: snapshot,
-            adventurerState: adventurerState,
-            modifiedSlots: {} // Init empty modifications
-          },
-        ],
-      };
-    }
-
-    case 'CANCEL_DUNGEON': {
-        return {
-            ...state,
-            activeRuns: state.activeRuns.filter(r => r.id !== action.payload.runId)
-        };
-    }
-
-    case 'STOP_REPEAT': {
-        return {
-            ...state,
-            activeRuns: state.activeRuns.map(r => 
-                r.id === action.payload.runId 
-                    ? { ...r, autoRepeat: false } 
-                    : r
-            )
-        };
-    }
-
-    case 'COMPLETE_DUNGEON': {
-      const { runId, success, kills } = action.payload;
-      
-      const run = state.activeRuns.find(r => r.id === runId);
-      if (!run) return state;
-
-      const dungeon = DUNGEONS.find(d => d.id === run.dungeonId);
-      const enemy = dungeon ? ENEMIES[dungeon.enemyId] : null;
-      if (!dungeon || !enemy) return state;
-
-      let newGold = state.gold;
-      let newInventory = [...state.inventory];
-      let newMaterials = { ...state.materials }; // Copy materials
-      let newStats = { ...state.statistics };
-      let newAdventurers = [...state.adventurers];
-      let goldGain = 0;
-      let xpGain = 0;
-      let droppedItems: Item[] = [];
-      let foundMaterials: Record<string, number> = {};
-
-      // Use Snapshot for Calculations
-      const snapshot = run.snapshot || calculateRunSnapshot(run.adventurerIds, state); 
-      
-      const isCombat = dungeon.type === ContractType.DUNGEON;
-
-      if (success && kills > 0) {
-        
-        // --- 1. COMBAT REWARDS (GOLD/GEAR/XP) ---
-        if (isCombat) {
-            let rawGold = 0;
-            let rawXp = 0;
-
-            const isOverpowered = snapshot.power > (dungeon.recommendedPower * 3);
-
-            if (isOverpowered) {
-                rawGold = kills * enemy.goldMin;
-                if (kills > 500) {
-                     const avgXp = ((enemy.xpMin + enemy.xpMax) / 2);
-                     rawXp = (kills * avgXp) * 0.10;
-                } else {
-                     for(let i=0; i<kills; i++) {
-                         const xpRoll = Math.floor(enemy.xpMin + Math.random() * (enemy.xpMax - enemy.xpMin + 1));
-                         rawXp += xpRoll;
-                     }
-                     rawXp = Math.floor(rawXp * 0.10);
-                }
-            } else {
-                if (kills > 500) {
-                    rawGold = kills * ((enemy.goldMin + enemy.goldMax) / 2);
-                    rawXp = kills * ((enemy.xpMin + enemy.xpMax) / 2);
-                } else {
-                    for(let i=0; i<kills; i++) {
-                        rawGold += Math.floor(enemy.goldMin + Math.random() * (enemy.goldMax - enemy.goldMin + 1));
-                        rawXp += Math.floor(enemy.xpMin + Math.random() * (enemy.xpMax - enemy.xpMin + 1));
-                    }
-                }
-            }
-            
-            goldGain = Math.floor(rawGold * (1 + snapshot.goldBonus));
-            xpGain = Math.floor(rawXp * (1 + snapshot.xpBonus));
-
-            newGold += goldGain;
-            newStats.totalGoldEarned += goldGain;
-            newStats.dungeonsCleared += 1;
-            newStats.monstersKilled += kills;
-
-            // Loot Logic (Gear)
-            const baseDropChance = dungeon.dropChance + snapshot.lootBonus;
-            const extraRolls = Math.floor(kills / 10);
-            const totalRolls = 1 + extraRolls;
-            
-            // Modifier Rules Check
-            const activeModifiers = snapshot.activeModifiers || [];
-            const isResourceScavenger = activeModifiers.includes('RESOURCE_SCAVENGER');
-            const isGambler = activeModifiers.includes('GAMBLER');
-
-            // Gambler Rule: Extra Rolls
-            const adjustedTotalRolls = totalRolls + (isGambler ? 2 : 0);
-
-            for (let i = 0; i < adjustedTotalRolls; i++) {
-                 if (Math.random() < baseDropChance) {
-                    
-                    if (isResourceScavenger) {
-                        // RULE: Drop Material Instead of Item
-                        const matIds = Object.keys(MATERIALS);
-                        const matId = matIds[Math.floor(Math.random() * matIds.length)]; // Generic scavenge
-                        const currentQty = newMaterials[matId] || 0;
-                        newMaterials[matId] = currentQty + 1;
-                        foundMaterials[matId] = (foundMaterials[matId] || 0) + 1;
-                    } else {
-                        // Standard Item Drop
-                        if (newInventory.length < INVENTORY_SIZE) {
-                            const newItem = generateItem(dungeon.level, state.prestigeUpgrades);
-                            newInventory.push(newItem);
-                            droppedItems.push(newItem);
-
-                            // Secondary drop logic (3% chance)
-                            if (newInventory.length < INVENTORY_SIZE && Math.random() < 0.03) {
-                                const bonusItem = generateItem(dungeon.level, state.prestigeUpgrades);
-                                newInventory.push(bonusItem);
-                                droppedItems.push(bonusItem);
-                            }
-                        }
-                    }
-                 }
-            }
-        } 
-        
-        // --- 2. GATHERING / FISHING REWARDS (MATERIALS) ---
-        else {
-             // Difficulty Calculation based on Power
-             const difficultyRatio = snapshot.power / dungeon.recommendedPower;
-             let yieldMultiplier = 1.0;
-             if (difficultyRatio < 1.0) yieldMultiplier = 0.5; // Low power penalty
-             if (difficultyRatio > 3.0) yieldMultiplier = 1.5; // Overpowered bonus (diminishing)
-             
-             const cycles = Math.max(1, Math.floor(kills / 2)); 
-             
-             // Material Drops
-             if (dungeon.lootTable) {
-                 for(let i=0; i<cycles; i++) {
-                     if (Math.random() < (dungeon.dropChance * yieldMultiplier)) {
-                         const matId = dungeon.lootTable[Math.floor(Math.random() * dungeon.lootTable.length)];
-                         const currentQty = newMaterials[matId] || 0;
-                         newMaterials[matId] = currentQty + 1;
-                         
-                         foundMaterials[matId] = (foundMaterials[matId] || 0) + 1;
-                     }
-                 }
-             }
-
-             // Proficiency XP
-             const proficiencyXpGain = Math.floor(cycles * (dungeon.level * 2)); // 2xp per cycle * level
-             
-             run.adventurerIds.forEach(advId => {
-                const adventurerIndex = state.adventurers.findIndex(a => a.id === advId);
-                if (adventurerIndex > -1) {
-                    const adv = { ...newAdventurers[adventurerIndex] };
-                    if (dungeon.type === ContractType.GATHERING) {
-                        adv.gatheringXp = (adv.gatheringXp || 0) + proficiencyXpGain;
-                    } else if (dungeon.type === ContractType.FISHING) {
-                        adv.fishingXp = (adv.fishingXp || 0) + proficiencyXpGain;
-                    }
-                    newAdventurers[adventurerIndex] = adv;
-                }
-             });
-        }
-
-        // Common XP Distribution (Combat XP) - ONLY for Combat Contracts
-        if (isCombat) {
-            run.adventurerIds.forEach(advId => {
-                const adventurerIndex = state.adventurers.findIndex(a => a.id === advId);
-                if (adventurerIndex > -1) {
-                    const adv = { ...newAdventurers[adventurerIndex] };
-                    const oldLevel = adv.level;
-                    adv.xp += xpGain;
-                    
-                    while (adv.xp >= adv.xpToNextLevel) {
-                        adv.level += 1;
-                        adv.xp -= adv.xpToNextLevel;
-                        adv.xpToNextLevel = Math.floor(adv.xpToNextLevel * 1.2);
-                        adv.baseStats.damage += 1;
-                        adv.baseStats.health += 5;
-                    }
-                    
-                    // Skill Point Award Logic
-                    const oldPoints = calculateTotalSkillPoints(oldLevel);
-                    const newPoints = calculateTotalSkillPoints(adv.level);
-                    const diff = newPoints - oldPoints;
-                    
-                    if (diff > 0) {
-                        adv.skillPoints += diff;
-                    }
-
-                    newAdventurers[adventurerIndex] = adv;
-                }
-            });
-        }
-      }
-
-      const report: DungeonReport = {
-          id: crypto.randomUUID(),
-          dungeonName: dungeon.name,
-          success: kills > 0,
-          kills: kills,
-          goldEarned: goldGain,
-          xpEarned: xpGain,
-          itemsFound: droppedItems,
-          materialsFound: foundMaterials,
-          timestamp: Date.now()
-      };
-
-      // Remove the COMPLETED run
-      let nextActiveRuns = state.activeRuns.filter(r => r.id !== runId);
-      
-      // Auto-Repeat Logic (Using the FRESH run object from state)
-      if (run.autoRepeat || run.runsRemaining > 1) {
-          // Recalculate snapshot based on NEW state (new gear applied)
-          const nextSnapshot = calculateRunSnapshot(run.adventurerIds, { ...state, adventurers: newAdventurers, upgrades: state.upgrades });
-          
-          // Re-Capture Adventurer State for the NEW run
-          const nextAdventurerState: Record<string, Adventurer> = {};
-          run.adventurerIds.forEach(id => {
-              const adv = newAdventurers.find(a => a.id === id);
-              if (adv) {
-                  nextAdventurerState[id] = JSON.parse(JSON.stringify(adv));
-              }
-          });
-
-          const restartedRun: ActiveRun = {
-              ...run,
-              id: crypto.randomUUID(), 
-              runsRemaining: run.autoRepeat ? 1 : run.runsRemaining - 1,
-              startTime: Date.now(),
-              duration: calculateDungeonDuration(dungeon.durationSeconds, state, run.adventurerIds) * 1000,
-              snapshot: nextSnapshot, 
-              adventurerState: nextAdventurerState,
-              modifiedSlots: {} // Clear modifications for fresh run
-          };
-          nextActiveRuns = [...nextActiveRuns, restartedRun];
-      }
-
-      return {
-        ...state,
-        gold: newGold,
-        inventory: newInventory,
-        materials: newMaterials,
-        statistics: newStats,
-        adventurers: newAdventurers,
-        recentReports: [...state.recentReports, report],
-        activeRuns: nextActiveRuns,
-      };
-    }
-    
-    // ... existing cases ...
-    case 'DISMISS_REPORT': {
-        return {
-            ...state,
-            recentReports: state.recentReports.filter(r => r.id !== action.payload.reportId)
-        };
-    }
-    // ... [Rest of file unchanged until default] ...
-
-    case 'EQUIP_ITEM': {
-        const { adventurerId, item } = action.payload;
-        const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
-        if (advIndex === -1) return state;
-
-        const adv = { ...state.adventurers[advIndex] };
-        
-        if (item.classRestriction && !item.classRestriction.includes(adv.role)) {
-            return state;
-        }
-
-        const oldItem = adv.slots[item.type];
-        
-        adv.slots = { ...adv.slots, [item.type]: item };
-
-        let newInv = state.inventory.filter(i => i.id !== item.id);
-        if (oldItem) {
-            newInv.push(oldItem);
-        }
-
-        const newAdvs = [...state.adventurers];
-        newAdvs[advIndex] = adv;
-        
-        let newActiveRuns = state.activeRuns;
-        const activeRunIndex = state.activeRuns.findIndex(r => r.adventurerIds.includes(adventurerId));
-        if (activeRunIndex !== -1) {
-            newActiveRuns = [...state.activeRuns];
-            const run = { ...newActiveRuns[activeRunIndex] };
-            const modifiedSlots = run.modifiedSlots ? { ...run.modifiedSlots } : {};
-            const advMods = modifiedSlots[adventurerId] ? [...modifiedSlots[adventurerId]] : [];
-            if (!advMods.includes(item.type)) advMods.push(item.type);
-            modifiedSlots[adventurerId] = advMods;
-            run.modifiedSlots = modifiedSlots;
-            newActiveRuns[activeRunIndex] = run;
-        }
-
-        return { ...state, adventurers: newAdvs, inventory: newInv, activeRuns: newActiveRuns };
-    }
-    case 'UNEQUIP_ITEM': {
-        const { adventurerId, slot } = action.payload;
-        const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
-        if (advIndex === -1) return state;
-        const adv = { ...state.adventurers[advIndex] };
-        const item = adv.slots[slot];
-        if (!item || state.inventory.length >= INVENTORY_SIZE) return state;
-
-        adv.slots = { ...adv.slots, [slot]: null };
-        const newAdvs = [...state.adventurers];
-        newAdvs[advIndex] = adv;
-
-        let newActiveRuns = state.activeRuns;
-        const activeRunIndex = state.activeRuns.findIndex(r => r.adventurerIds.includes(adventurerId));
-        if (activeRunIndex !== -1) {
-             newActiveRuns = [...state.activeRuns];
-             const run = { ...newActiveRuns[activeRunIndex] };
-             const modifiedSlots = run.modifiedSlots ? { ...run.modifiedSlots } : {};
-             const advMods = modifiedSlots[adventurerId] ? [...modifiedSlots[adventurerId]] : [];
-             if (!advMods.includes(slot)) advMods.push(slot);
-             modifiedSlots[adventurerId] = advMods;
-             run.modifiedSlots = modifiedSlots;
-             newActiveRuns[activeRunIndex] = run;
-        }
-
-        return { ...state, adventurers: newAdvs, inventory: [...state.inventory, item], activeRuns: newActiveRuns };
-    }
-    case 'SALVAGE_ITEM': {
-        const item = state.inventory.find(i => i.id === action.payload.itemId);
-        if (!item) return state;
-        return { ...state, gold: state.gold + item.value, inventory: state.inventory.filter(i => i.id !== action.payload.itemId) };
-    }
-    case 'SALVAGE_MANY_ITEMS': {
-        const { itemIds } = action.payload;
-        const itemsToSalvage = state.inventory.filter(i => itemIds.includes(i.id));
-        const totalValue = itemsToSalvage.reduce((sum, i) => sum + i.value, 0);
-        return { ...state, gold: state.gold + totalValue, inventory: state.inventory.filter(i => !itemIds.includes(i.id)) };
-    }
-    case 'BUY_UPGRADE': {
-        const { upgradeId, cost } = action.payload;
-        if (state.gold < cost) return state;
-        return { ...state, gold: state.gold - cost, upgrades: { ...state.upgrades, [upgradeId]: (state.upgrades[upgradeId] || 0) + 1 } };
-    }
-    case 'RECRUIT_ADVENTURER': {
-       if (state.gold < action.payload.cost) return state;
-       const newAdv = generateAdventurer(`adv_${Date.now()}`);
-       return { ...state, gold: state.gold - action.payload.cost, adventurers: [...state.adventurers, newAdv] };
-    }
-    case 'PRESTIGE': {
-        const currency = action.payload.currencyAwarded;
-        return { ...initialState, prestigeCurrency: state.prestigeCurrency + currency, prestigeUpgrades: state.prestigeUpgrades, statistics: { totalGoldEarned: 0, monstersKilled: 0, dungeonsCleared: 0 } };
-    }
-    case 'BUY_PRESTIGE_UPGRADE': {
-        const { upgradeId, cost } = action.payload;
-        if (state.prestigeCurrency < cost) return state;
-        return { ...state, prestigeCurrency: state.prestigeCurrency - cost, prestigeUpgrades: { ...state.prestigeUpgrades, [upgradeId]: (state.prestigeUpgrades[upgradeId] || 0) + 1 } };
-    }
-    case 'ENCHANT_ITEM': {
-        const { itemId } = action.payload;
-        const invIndex = state.inventory.findIndex(i => i.id === itemId);
-        let itemToEnchant: Item | null = null;
-        let location: 'INVENTORY' | 'EQUIPPED' = 'INVENTORY';
-        let advId = '';
-        let slot: ItemType | null = null;
-
-        if (invIndex !== -1) { itemToEnchant = { ...state.inventory[invIndex] }; } 
-        else {
-            for (const adv of state.adventurers) {
-                if (adv.slots.Weapon?.id === itemId) { itemToEnchant = { ...adv.slots.Weapon }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.WEAPON; break; }
-                if (adv.slots.Armor?.id === itemId) { itemToEnchant = { ...adv.slots.Armor }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.ARMOR; break; }
-                if (adv.slots.Trinket?.id === itemId) { itemToEnchant = { ...adv.slots.Trinket }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.TRINKET; break; }
-            }
-        }
-        if (!itemToEnchant) return state;
-        const maxStats = MAX_STATS_BY_RARITY[itemToEnchant.rarity];
-        if (itemToEnchant.stats.length >= maxStats) return state;
-        const cost = calculateItemUpgradeCost(itemToEnchant, 'ENCHANT');
-        if (state.gold < cost) return state;
-
-        const existingNames = itemToEnchant.stats.map(s => s.name);
-        const newStat = generateRandomAffix(itemToEnchant.level, itemToEnchant.rarity, existingNames);
-        itemToEnchant.stats = [...itemToEnchant.stats, newStat];
-        itemToEnchant.value = Math.floor(itemToEnchant.value * 1.1);
-
-        if (location === 'INVENTORY') {
-            const newInventory = [...state.inventory];
-            newInventory[invIndex] = itemToEnchant;
-            return { ...state, gold: state.gold - cost, inventory: newInventory };
-        } else if (location === 'EQUIPPED' && slot) {
-             const advIndex = state.adventurers.findIndex(a => a.id === advId);
-             if (advIndex === -1) return state;
-             const newAdv = { ...state.adventurers[advIndex] };
-             newAdv.slots = { ...newAdv.slots, [slot]: itemToEnchant };
-             const newAdvs = [...state.adventurers];
-             newAdvs[advIndex] = newAdv;
-             return { ...state, gold: state.gold - cost, adventurers: newAdvs };
-        }
-        return state;
-    }
-    case 'REROLL_STAT': {
-        const { itemId, statIndex } = action.payload;
-        const invIndex = state.inventory.findIndex(i => i.id === itemId);
-        let itemToReroll: Item | null = null;
-        let location: 'INVENTORY' | 'EQUIPPED' = 'INVENTORY';
-        let advId = '';
-        let slot: ItemType | null = null;
-
-        if (invIndex !== -1) { itemToReroll = { ...state.inventory[invIndex] }; } 
-        else {
-             for (const adv of state.adventurers) {
-                if (adv.slots.Weapon?.id === itemId) { itemToReroll = { ...adv.slots.Weapon }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.WEAPON; break; }
-                if (adv.slots.Armor?.id === itemId) { itemToReroll = { ...adv.slots.Armor }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.ARMOR; break; }
-                if (adv.slots.Trinket?.id === itemId) { itemToReroll = { ...adv.slots.Trinket }; location = 'EQUIPPED'; advId = adv.id; slot = ItemType.TRINKET; break; }
-            }
-        }
-
-        if (!itemToReroll) return state;
-        if (statIndex < 0 || statIndex >= itemToReroll.stats.length) return state;
-        const cost = calculateItemUpgradeCost(itemToReroll, 'REROLL');
-        if (state.gold < cost) return state;
-
-        const oldStat = itemToReroll.stats[statIndex];
-        const newTier = rollStatTier();
-        const tierMultiplier = TIER_MULTIPLIERS[newTier];
-        let newStat;
-
-        if (statIndex === 0) {
-            const rarityMultiplier = ITEM_RARITY_MULTIPLIERS[itemToReroll.rarity] || 1;
-            const baseBudget = 3 * itemToReroll.level * rarityMultiplier;
-            const effectiveBudget = baseBudget * tierMultiplier;
-            let val = 1;
-            if (oldStat.name === 'Damage') {
-                const multiplier = itemToReroll.type === ItemType.WEAPON ? 1.0 : 0.5;
-                val = Math.max(1, Math.round(effectiveBudget * multiplier));
-            } else if (oldStat.name === 'Health') {
-                const multiplier = itemToReroll.type === ItemType.ARMOR ? 5.0 : 2.5;
-                val = Math.max(5, Math.round(effectiveBudget * multiplier));
-            }
-            newStat = { ...oldStat, value: val, tier: newTier };
-        } else {
-            const existingNames = itemToReroll.stats.filter((_, idx) => idx !== statIndex).map(s => s.name);
-            newStat = generateRandomAffix(itemToReroll.level, itemToReroll.rarity, existingNames);
-        }
-        const newStats = [...itemToReroll.stats];
-        newStats[statIndex] = newStat;
-        itemToReroll.stats = newStats;
-
-        if (location === 'INVENTORY') {
-            const newInventory = [...state.inventory];
-            newInventory[invIndex] = itemToReroll;
-            return { ...state, gold: state.gold - cost, inventory: newInventory };
-        } else if (location === 'EQUIPPED' && slot) {
-             const advIndex = state.adventurers.findIndex(a => a.id === advId);
-             if (advIndex === -1) return state;
-             const newAdv = { ...state.adventurers[advIndex] };
-             newAdv.slots = { ...newAdv.slots, [slot]: itemToReroll };
-             const newAdvs = [...state.adventurers];
-             newAdvs[advIndex] = newAdv;
-             return { ...state, gold: state.gold - cost, adventurers: newAdvs };
-        }
-        return state;
-    }
-    case 'UNLOCK_SKILL': {
-        const { adventurerId, skillId } = action.payload;
-        const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
-        if (advIndex === -1) return state;
-
-        const adv = { ...state.adventurers[advIndex] };
-        const node = adv.skillTree?.find(n => n.id === skillId);
-        if (!node) return state;
-
-        const cost = node.cost || 1;
-        if (adv.skillPoints < cost) return state;
-        if (adv.unlockedSkills.includes(skillId)) return state;
-
-        if (node.exclusiveGroup) {
-            const hasExclusiveSibling = adv.unlockedSkills.some(id => {
-                const sibling = adv.skillTree?.find(n => n.id === id);
-                return sibling && sibling.exclusiveGroup === node.exclusiveGroup;
-            });
-            if (hasExclusiveSibling) return state;
-        }
-
-        adv.skillPoints -= cost;
-        adv.unlockedSkills = [...adv.unlockedSkills, skillId];
-        const newAdvs = [...state.adventurers];
-        newAdvs[advIndex] = adv;
-
-        return { ...state, adventurers: newAdvs };
-    }
-    case 'RENAME_ADVENTURER': {
-        const { adventurerId, newName } = action.payload;
-        if (!newName.trim()) return state;
-        
-        const advIndex = state.adventurers.findIndex(a => a.id === adventurerId);
-        if (advIndex === -1) return state;
-
-        const newAdvs = [...state.adventurers];
-        newAdvs[advIndex] = { ...newAdvs[advIndex], name: newName.trim() };
-        
-        return { ...state, adventurers: newAdvs };
-    }
-    default:
-      return state;
+    dungeonsCleared: 0
   }
 };
 
-interface GameContextProps {
+interface GameContextType {
   state: GameState;
+  recruitAdventurer: () => void;
+  renameAdventurer: (id: string, name: string) => void;
   startDungeon: (dungeonId: string, adventurerIds: string[], autoRepeat: boolean) => void;
   cancelDungeon: (runId: string) => void;
   stopRepeat: (runId: string) => void;
-  dismissReport: (reportId: string) => void;
+  salvageItem: (itemId: string) => void;
+  salvageManyItems: (ids: string[]) => void;
   equipItem: (adventurerId: string, item: Item) => void;
   unequipItem: (adventurerId: string, slot: ItemType) => void;
-  salvageItem: (itemId: string) => void;
-  salvageManyItems: (itemIds: string[]) => void;
-  buyUpgrade: (upgradeId: string) => void;
-  recruitAdventurer: () => void;
-  importSave: (jsonString: string) => boolean;
+  buyUpgrade: (id: string) => void;
+  buyPrestigeUpgrade: (id: string) => void;
   doPrestige: () => void;
-  buyPrestigeUpgrade: (upgradeId: string) => void;
+  unlockLootFilter: () => void;
+  updateLootFilter: (settings: Partial<LootFilterSettings>) => void;
   enchantItem: (itemId: string) => void;
   rerollStat: (itemId: string, statIndex: number) => void;
-  unlockSkill: (adventurerId: string, skillId: string) => void;
-  renameAdventurer: (adventurerId: string, newName: string) => void;
+  dismissReport: (reportId: string) => void;
+  importSave: (json: string) => boolean;
+  unlockSkill: (adventurerId: string, nodeId: string) => void;
 }
 
-const GameContext = createContext<GameContextProps | undefined>(undefined);
+const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, dispatch] = useReducer(gameReducer, initialState);
-  const saveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Load Game
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
+  const [state, setState] = useState<GameState>(() => {
+    const saved = localStorage.getItem('dungeon-contractor-save');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        
-        // Migration logic...
-        if (parsed.adventurers) {
-            parsed.adventurers = parsed.adventurers.map((adv: any) => {
-                if (!adv.role) adv.role = AdventurerRole.WARRIOR;
-                if (!adv.rarity) adv.rarity = Rarity.COMMON;
-                if (adv.baseStats) {
-                    if (adv.baseStats.critChance === undefined) adv.baseStats.critChance = 0.05;
-                }
-                
-                // V9 Migration: Add proficiency XP
-                if (adv.gatheringXp === undefined) adv.gatheringXp = 0;
-                if (adv.fishingXp === undefined) adv.fishingXp = 0;
-                
-                // V10 Hybrid System Migration
-                if (!adv.traitId) {
-                     const trait = ADVENTURER_TRAITS[Math.floor(Math.random() * ADVENTURER_TRAITS.length)];
-                     adv.traitId = trait.id;
-                }
-                if (adv.skillPoints === undefined) {
-                     adv.skillPoints = calculateTotalSkillPoints(adv.level || 1);
-                }
-                if (!adv.unlockedSkills) {
-                     adv.unlockedSkills = [];
-                }
-                // V11: Unique Skill Tree Migration
-                if (!adv.skillTree) {
-                    const { tree, archetype } = generateSkillTree(adv.role);
-                    adv.skillTree = tree;
-                    adv.archetype = archetype;
-                }
-                // V12: Archetype Migration (Update old trees if needed, or simple assign empty archetype name if missing)
-                if (!adv.archetype && adv.skillTree) {
-                    adv.archetype = "Mercenary"; // Legacy fallback
-                }
-
-                // V13: Name/Title Migration
-                if (!adv.title) {
-                    const titles = TITLES_BY_ROLE[adv.role] || ["Mercenary"];
-                    adv.title = titles[0]; // Default to basic title if migrating
-                }
-
-                // Patch equipped items for Tiers
-                Object.values(ItemType).forEach(type => {
-                    const item = adv.slots[type];
-                    if (item && item.stats) {
-                        item.stats = item.stats.map((s: any) => ({
-                            ...s,
-                            tier: s.tier || 7 // Default to Tier 7 (Worst) for old items
-                        }));
-                    }
-                });
-
-                return adv;
-            });
-        }
-        
-        if (parsed.inventory) {
-             parsed.inventory = parsed.inventory.map((item: any) => {
-                 if (item.stats) {
-                     item.stats = item.stats.map((s: any) => ({
-                         ...s,
-                         tier: s.tier || 7 // Default to Tier 7 for old items
-                     }));
-                 }
-                 return item;
-             });
-        }
-
-        if (!parsed.prestigeUpgrades) parsed.prestigeUpgrades = {};
-        if (parsed.prestigeCurrency === undefined) parsed.prestigeCurrency = 0;
-        
-        // V9 Migration: Materials
-        if (!parsed.materials) parsed.materials = {};
-
-        delete parsed.offlineSetup;
-        delete parsed.offlineReport;
-
-        if (parsed.activeRuns) {
-            parsed.activeRuns = parsed.activeRuns.map((run: any) => {
-                if (run.adventurerId && !run.adventurerIds) {
-                    return { ...run, adventurerIds: [run.adventurerId], adventurerId: undefined };
-                }
-                if (!run.id) run.id = crypto.randomUUID();
-                if (run.autoRepeat === undefined) run.autoRepeat = false;
-                if (run.runsRemaining === undefined) {
-                    return { ...run, runsRemaining: 1, totalRuns: 1 };
-                }
-                if (!run.snapshot) {
-                }
-                if (!run.adventurerState) {
-                    run.adventurerState = {};
-                }
-                if (!run.modifiedSlots) {
-                    run.modifiedSlots = {};
-                }
-                return run;
-            });
-        }
-        
-        if (!parsed.lastParties) parsed.lastParties = {};
-        if (!parsed.recentReports) parsed.recentReports = [];
-
-        dispatch({ type: 'LOAD_GAME', payload: parsed });
-        
+        return { ...INITIAL_STATE, ...parsed };
       } catch (e) {
         console.error("Failed to load save", e);
       }
     }
+    return INITIAL_STATE;
+  });
+
+  // Persist Save
+  useEffect(() => {
+    const timer = setInterval(() => {
+        setState(prev => {
+            const next = { ...prev, lastSaveTime: Date.now() };
+            localStorage.setItem('dungeon-contractor-save', JSON.stringify(next));
+            return next;
+        });
+    }, 10000); // Auto-save every 10s
+    return () => clearInterval(timer);
   }, []);
 
-  // Save Loop
+  // Initialize with at least one adventurer if empty
   useEffect(() => {
-    saveIntervalRef.current = setInterval(() => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }, 5000); 
-    return () => {
-      if (saveIntervalRef.current) clearInterval(saveIntervalRef.current);
-    };
-  }, [state]);
+      if (state.adventurers.length === 0) {
+          // Hardcoded Starter to ensure Power = 25 (Warrior Base Stats)
+          const { tree, archetype } = generateSkillTree(AdventurerRole.WARRIOR);
+          const starter: Adventurer = {
+              id: crypto.randomUUID(),
+              name: "Eldric",
+              title: "Squire",
+              role: AdventurerRole.WARRIOR,
+              rarity: Rarity.COMMON,
+              level: 1,
+              xp: 0,
+              xpToNextLevel: 100,
+              gatheringXp: 0,
+              fishingXp: 0,
+              traitId: 'scholar', // XP Bonus does not affect Power calculation
+              skillPoints: 0,
+              unlockedSkills: [],
+              skillTree: tree,
+              archetype: archetype,
+              slots: { [ItemType.WEAPON]: null, [ItemType.ARMOR]: null, [ItemType.TRINKET]: null },
+              baseStats: {
+                  damage: 4,
+                  health: 120,
+                  speed: 0.9,
+                  critChance: 0.05
+              }
+          };
 
-  // Game Loop (Tick)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      
-      // Check active runs for completion
-      state.activeRuns.forEach(run => {
-         if (now >= run.startTime + run.duration) {
-             const dungeon = DUNGEONS.find(d => d.id === run.dungeonId);
-             
-             if (dungeon) {
-                // CALCULATE RESULTS
-                const enemy = ENEMIES[dungeon.enemyId];
-                if (enemy) {
-                    // Use Snapshot if available (New Logic), fallback to real-time (Old Logic - Migration)
-                    const dps = run.snapshot ? run.snapshot.dps : calculatePartyDps(run.adventurerIds, state);
-                    const totalDamage = dps * (run.duration / 1000);
-                    
-                    let kills = Math.floor(totalDamage / enemy.hp);
+          setState(prev => ({
+              ...prev,
+              adventurers: [starter]
+          }));
+      }
+  }, []);
 
-                    // Fix for Gathering/Fishing: Ensure at least 1 "kill" (cycle) if time completed, 
-                    // regardless of damage output vs HP threshold.
-                    // BUT introduce a small flat failure chance (5%) for flavor.
-                    if (dungeon.type !== ContractType.DUNGEON) {
-                        if (Math.random() < 0.05) {
-                            kills = 0; // Bad luck!
-                        } else {
-                            kills = Math.max(1, kills);
-                        }
-                    }
+  // --- Actions ---
 
-                    const success = kills > 0;
-
-                    // Pass ID instead of object reference
-                    dispatch({ type: 'COMPLETE_DUNGEON', payload: { runId: run.id, success, kills }});
-                }
-             }
-         }
+  const recruitAdventurer = useCallback(() => {
+      setState(prev => {
+          const cost = 100 * Math.pow(5, prev.adventurers.length - 1);
+          if (prev.gold < cost) return prev;
+          
+          const newAdv = generateAdventurer(crypto.randomUUID());
+          return {
+              ...prev,
+              gold: prev.gold - cost,
+              adventurers: [...prev.adventurers, newAdv]
+          };
       });
+  }, []);
 
-      dispatch({ type: 'TICK', payload: { currentTime: now } });
-    }, 200); 
-
-    return () => clearInterval(interval);
-  }, [state.activeRuns, state.adventurers, state.upgrades, state.prestigeUpgrades]);
+  const renameAdventurer = useCallback((id: string, name: string) => {
+      setState(prev => ({
+          ...prev,
+          adventurers: prev.adventurers.map(a => a.id === id ? { ...a, name: name.slice(0, 20) } : a)
+      }));
+  }, []);
 
   const startDungeon = useCallback((dungeonId: string, adventurerIds: string[], autoRepeat: boolean) => {
-    dispatch({ type: 'START_DUNGEON', payload: { dungeonId, adventurerIds, autoRepeat } });
+      setState(prev => {
+          const dungeon = DUNGEONS.find(d => d.id === dungeonId);
+          if (!dungeon) return prev;
+
+          // Snapshot calculations
+          const snapshot = calculateRunSnapshot(adventurerIds, prev);
+          const duration = calculateDungeonDuration(dungeon.durationSeconds * 1000, prev, adventurerIds);
+
+          // Deep copy adventurer state for the snapshot
+          const adventurerState: Record<string, Adventurer> = {};
+          adventurerIds.forEach(id => {
+              const adv = prev.adventurers.find(a => a.id === id);
+              if (adv) adventurerState[id] = JSON.parse(JSON.stringify(adv));
+          });
+
+          const newRun: ActiveRun = {
+              id: crypto.randomUUID(),
+              dungeonId,
+              adventurerIds,
+              startTime: Date.now(),
+              duration,
+              runsRemaining: autoRepeat ? -1 : 1,
+              totalRuns: 0,
+              autoRepeat,
+              snapshot,
+              adventurerState,
+              modifiedSlots: {} // Track changes
+          };
+
+          return {
+              ...prev,
+              activeRuns: [...prev.activeRuns, newRun],
+              lastParties: {
+                  ...prev.lastParties,
+                  [dungeonId]: adventurerIds
+              }
+          };
+      });
   }, []);
 
   const cancelDungeon = useCallback((runId: string) => {
-      dispatch({ type: 'CANCEL_DUNGEON', payload: { runId } });
+      setState(prev => ({
+          ...prev,
+          activeRuns: prev.activeRuns.filter(r => r.id !== runId)
+      }));
   }, []);
 
   const stopRepeat = useCallback((runId: string) => {
-      dispatch({ type: 'STOP_REPEAT', payload: { runId } });
-  }, []);
-  
-  const dismissReport = useCallback((reportId: string) => {
-    dispatch({ type: 'DISMISS_REPORT', payload: { reportId } });
-  }, []);
-
-  const equipItem = useCallback((adventurerId: string, item: Item) => {
-    dispatch({ type: 'EQUIP_ITEM', payload: { adventurerId, item } });
+      setState(prev => ({
+          ...prev,
+          activeRuns: prev.activeRuns.map(r => r.id === runId ? { ...r, autoRepeat: false, runsRemaining: 1 } : r)
+      }));
   }, []);
 
-  const unequipItem = useCallback((adventurerId: string, slot: ItemType) => {
-    dispatch({ type: 'UNEQUIP_ITEM', payload: { adventurerId, slot } });
+  const unlockLootFilter = useCallback(() => {
+      setState(prev => {
+          if (prev.gold < LOOT_FILTER_UNLOCK_COST) return prev;
+          return {
+              ...prev,
+              gold: prev.gold - LOOT_FILTER_UNLOCK_COST,
+              lootFilter: { ...prev.lootFilter, unlocked: true, enabled: true }
+          };
+      });
+  }, []);
+
+  const updateLootFilter = useCallback((settings: Partial<LootFilterSettings>) => {
+      setState(prev => ({
+          ...prev,
+          lootFilter: { ...prev.lootFilter, ...settings }
+      }));
   }, []);
 
   const salvageItem = useCallback((itemId: string) => {
-    dispatch({ type: 'SALVAGE_ITEM', payload: { itemId } });
+      setState(prev => {
+          const item = prev.inventory.find(i => i.id === itemId);
+          if (!item) return prev;
+          return {
+              ...prev,
+              gold: prev.gold + item.value,
+              inventory: prev.inventory.filter(i => i.id !== itemId)
+          };
+      });
   }, []);
 
-  const salvageManyItems = useCallback((itemIds: string[]) => {
-    dispatch({ type: 'SALVAGE_MANY_ITEMS', payload: { itemIds } });
+  const salvageManyItems = useCallback((ids: string[]) => {
+      setState(prev => {
+          const itemsToSalvage = prev.inventory.filter(i => ids.includes(i.id));
+          const totalValue = itemsToSalvage.reduce((sum, i) => sum + i.value, 0);
+          return {
+              ...prev,
+              gold: prev.gold + totalValue,
+              inventory: prev.inventory.filter(i => !ids.includes(i.id))
+          };
+      });
   }, []);
 
-  const buyUpgrade = (upgradeId: string) => {
-      const upg = UPGRADES.find(u => u.id === upgradeId);
-      if(!upg) return;
-      const currentLevel = state.upgrades[upgradeId] || 0;
-      const cost = Math.floor(upg.cost * Math.pow(upg.costMultiplier, currentLevel));
-      dispatch({ type: 'BUY_UPGRADE', payload: { upgradeId, cost }});
-  };
-
-  const recruitAdventurer = () => {
-      const count = state.adventurers.length;
-      const cost = 100 * Math.pow(5, count - 1);
-      dispatch({ type: 'RECRUIT_ADVENTURER', payload: { cost }});
-  };
-
-  const importSave = (jsonString: string): boolean => {
-      try {
-          const parsed = JSON.parse(jsonString);
-          if (typeof parsed.gold !== 'number' || !Array.isArray(parsed.adventurers)) {
-              return false;
+  const equipItem = useCallback((adventurerId: string, item: Item) => {
+      setState(prev => {
+          const advIndex = prev.adventurers.findIndex(a => a.id === adventurerId);
+          if (advIndex === -1) return prev;
+          
+          const adv = { ...prev.adventurers[advIndex] };
+          const oldItem = adv.slots[item.type];
+          
+          // Remove from inventory
+          let newInventory = prev.inventory.filter(i => i.id !== item.id);
+          
+          // Return old item to inventory
+          if (oldItem) {
+              newInventory.push(oldItem);
           }
-          dispatch({ type: 'IMPORT_SAVE', payload: parsed });
-          return true;
-      } catch (e) {
-          console.error("Invalid save string", e);
-          return false;
-      }
-  };
+
+          // Update Adventurer
+          adv.slots = { ...adv.slots, [item.type]: item };
+          const newAdventurers = [...prev.adventurers];
+          newAdventurers[advIndex] = adv;
+
+          // Track modification if adventurer is busy
+          const activeRuns = prev.activeRuns.map(run => {
+              if (run.adventurerIds.includes(adventurerId)) {
+                  const currentMods = run.modifiedSlots?.[adventurerId] || [];
+                  if (!currentMods.includes(item.type)) {
+                      return {
+                          ...run,
+                          modifiedSlots: {
+                              ...run.modifiedSlots,
+                              [adventurerId]: [...currentMods, item.type]
+                          }
+                      };
+                  }
+              }
+              return run;
+          });
+
+          return {
+              ...prev,
+              adventurers: newAdventurers,
+              inventory: newInventory,
+              activeRuns
+          };
+      });
+  }, []);
+
+  const unequipItem = useCallback((adventurerId: string, slot: ItemType) => {
+      setState(prev => {
+          const advIndex = prev.adventurers.findIndex(a => a.id === adventurerId);
+          if (advIndex === -1) return prev;
+          
+          const adv = { ...prev.adventurers[advIndex] };
+          const item = adv.slots[slot];
+          if (!item) return prev;
+
+          // Check inventory space
+          if (prev.inventory.length >= INVENTORY_SIZE) return prev;
+
+          adv.slots = { ...adv.slots, [slot]: null };
+          const newAdventurers = [...prev.adventurers];
+          newAdventurers[advIndex] = adv;
+
+          // Track modification
+          const activeRuns = prev.activeRuns.map(run => {
+              if (run.adventurerIds.includes(adventurerId)) {
+                  const currentMods = run.modifiedSlots?.[adventurerId] || [];
+                  if (!currentMods.includes(slot)) {
+                      return {
+                          ...run,
+                          modifiedSlots: {
+                              ...run.modifiedSlots,
+                              [adventurerId]: [...currentMods, slot]
+                          }
+                      };
+                  }
+              }
+              return run;
+          });
+
+          return {
+              ...prev,
+              adventurers: newAdventurers,
+              inventory: [...prev.inventory, item],
+              activeRuns
+          };
+      });
+  }, []);
+
+  const buyUpgrade = useCallback((id: string) => {
+      setState(prev => {
+          const upgrade = UPGRADES.find(u => u.id === id);
+          if (!upgrade) return prev;
+          
+          const currentLevel = prev.upgrades[id] || 0;
+          if (currentLevel >= upgrade.maxLevel) return prev;
+
+          const cost = Math.floor(upgrade.cost * Math.pow(upgrade.costMultiplier, currentLevel));
+          if (prev.gold < cost) return prev;
+
+          return {
+              ...prev,
+              gold: prev.gold - cost,
+              upgrades: { ...prev.upgrades, [id]: currentLevel + 1 }
+          };
+      });
+  }, []);
+
+  const buyPrestigeUpgrade = useCallback((id: string) => {
+      setState(prev => {
+          const upgrade = PRESTIGE_UPGRADES.find(u => u.id === id);
+          if (!upgrade) return prev;
+          
+          const currentLevel = prev.prestigeUpgrades[id] || 0;
+          if (currentLevel >= upgrade.maxLevel) return prev;
+
+          const cost = Math.floor(upgrade.cost * Math.pow(upgrade.costMultiplier, currentLevel));
+          if (prev.prestigeCurrency < cost) return prev;
+
+          return {
+              ...prev,
+              prestigeCurrency: prev.prestigeCurrency - cost,
+              prestigeUpgrades: { ...prev.prestigeUpgrades, [id]: currentLevel + 1 }
+          };
+      });
+  }, []);
 
   const doPrestige = useCallback(() => {
-      const currency = calculatePrestigeGain(state.statistics.totalGoldEarned);
-      dispatch({ type: 'PRESTIGE', payload: { currencyAwarded: currency }});
-  }, [state.statistics.totalGoldEarned]);
+      setState(prev => {
+          // Calculate currency gain
+          const gain = Math.floor(Math.sqrt(prev.statistics.totalGoldEarned / 10000));
+          if (gain <= 0) return prev;
 
-  const buyPrestigeUpgrade = useCallback((upgradeId: string) => {
-      const upg = PRESTIGE_UPGRADES.find(u => u.id === upgradeId);
-      if(!upg) return;
-      const currentLevel = state.prestigeUpgrades[upgradeId] || 0;
-      const cost = Math.floor(upg.cost * Math.pow(upg.costMultiplier, currentLevel));
-      dispatch({ type: 'BUY_PRESTIGE_UPGRADE', payload: { upgradeId, cost }});
-  }, [state.prestigeUpgrades, state.prestigeCurrency]);
+          return {
+              ...INITIAL_STATE,
+              prestigeCurrency: prev.prestigeCurrency + gain,
+              prestigeUpgrades: prev.prestigeUpgrades, // Keep prestige upgrades
+              statistics: {
+                  ...INITIAL_STATE.statistics,
+                  totalGoldEarned: 0 // Reset for next run
+              }
+          };
+      });
+  }, []);
 
   const enchantItem = useCallback((itemId: string) => {
-      dispatch({ type: 'ENCHANT_ITEM', payload: { itemId } });
+      setState(prev => {
+          // Find item in inventory or adventurers
+          let item = prev.inventory.find(i => i.id === itemId);
+          let location: 'INVENTORY' | 'ADVENTURER' = 'INVENTORY';
+          let holderId = '';
+          
+          if (!item) {
+              for (const adv of prev.adventurers) {
+                  const found = Object.values(adv.slots).find((s: Item | null) => s && s.id === itemId);
+                  if (found) {
+                      item = found;
+                      location = 'ADVENTURER';
+                      holderId = adv.id;
+                      break;
+                  }
+              }
+          }
+          if (!item) return prev;
+
+          const cost = calculateItemUpgradeCost(item, 'ENCHANT');
+          if (prev.gold < cost) return prev;
+
+          // Logic to add random stat
+          const newItem = { ...item, stats: [...item.stats] };
+          const existingNames = newItem.stats.map(s => s.name);
+          const newStat = generateRandomAffix(newItem.level, newItem.rarity, existingNames);
+          newItem.stats.push(newStat);
+
+          // Update State
+          const nextState = { ...prev, gold: prev.gold - cost };
+          if (location === 'INVENTORY') {
+              nextState.inventory = prev.inventory.map(i => i.id === itemId ? newItem : i);
+          } else {
+              nextState.adventurers = prev.adventurers.map(a => {
+                  if (a.id === holderId) {
+                      const newSlots = { ...a.slots };
+                      (Object.keys(newSlots) as ItemType[]).forEach(k => {
+                          if (newSlots[k]?.id === itemId) newSlots[k] = newItem;
+                      });
+                      return { ...a, slots: newSlots };
+                  }
+                  return a;
+              });
+          }
+          return nextState;
+      });
   }, []);
 
   const rerollStat = useCallback((itemId: string, statIndex: number) => {
-      dispatch({ type: 'REROLL_STAT', payload: { itemId, statIndex } });
+      setState(prev => {
+          let item = prev.inventory.find(i => i.id === itemId);
+          let location: 'INVENTORY' | 'ADVENTURER' = 'INVENTORY';
+          let holderId = '';
+          
+          if (!item) {
+              for (const adv of prev.adventurers) {
+                  const found = Object.values(adv.slots).find((s: Item | null) => s && s.id === itemId);
+                  if (found) {
+                      item = found;
+                      location = 'ADVENTURER';
+                      holderId = adv.id;
+                      break;
+                  }
+              }
+          }
+          if (!item || !item.stats[statIndex]) return prev;
+
+          const cost = calculateItemUpgradeCost(item, 'REROLL');
+          if (prev.gold < cost) return prev;
+
+          // Reroll Logic
+          const newItem = { ...item, stats: [...item.stats] };
+          const oldStat = newItem.stats[statIndex];
+          
+          // Generate new budget/tier
+          const budget = getStatBudget(newItem.level, newItem.rarity, prev.prestigeUpgrades);
+          const newTier = rollStatTier();
+          
+          // Re-calculate value based on tier
+          
+          let newVal = 0;
+          if (statIndex === 0) {
+               // Main stat logic from generateItem
+               const budget = getStatBudget(newItem.level, newItem.rarity, prev.prestigeUpgrades);
+               const tierMult = {1:2.0, 2:1.6, 3:1.35, 4:1.15, 5:1.0, 6:0.85, 7:0.65}[newTier] || 1.0;
+               newVal = Math.round(budget * tierMult);
+               if (newItem.type === ItemType.ARMOR) newVal *= 5; // Health scaling
+               
+               newItem.stats[statIndex] = { ...oldStat, value: Math.max(1, newVal), tier: newTier };
+          } else {
+               // Affix
+               const newAffix = generateRandomAffix(newItem.level, newItem.rarity, []);
+               newItem.stats[statIndex] = newAffix; 
+          }
+
+          const nextState = { ...prev, gold: prev.gold - cost };
+          if (location === 'INVENTORY') {
+              nextState.inventory = prev.inventory.map(i => i.id === itemId ? newItem : i);
+          } else {
+              nextState.adventurers = prev.adventurers.map(a => {
+                  if (a.id === holderId) {
+                      const newSlots = { ...a.slots };
+                      (Object.keys(newSlots) as ItemType[]).forEach(k => {
+                          if (newSlots[k]?.id === itemId) newSlots[k] = newItem;
+                      });
+                      return { ...a, slots: newSlots };
+                  }
+                  return a;
+              });
+          }
+          return nextState;
+      });
   }, []);
 
-  const unlockSkill = useCallback((adventurerId: string, skillId: string) => {
-      dispatch({ type: 'UNLOCK_SKILL', payload: { adventurerId, skillId } });
+  const dismissReport = useCallback((id: string) => {
+      setState(prev => ({
+          ...prev,
+          recentReports: prev.recentReports.filter(r => r.id !== id)
+      }));
   }, []);
 
-  const renameAdventurer = useCallback((adventurerId: string, newName: string) => {
-      dispatch({ type: 'RENAME_ADVENTURER', payload: { adventurerId, newName } });
+  const importSave = useCallback((json: string) => {
+      try {
+          const parsed = JSON.parse(json);
+          // Basic validation could go here
+          if (!parsed.gold || !parsed.adventurers) return false;
+          setState({ ...INITIAL_STATE, ...parsed });
+          return true;
+      } catch (e) {
+          return false;
+      }
+  }, []);
+
+  const unlockSkill = useCallback((adventurerId: string, nodeId: string) => {
+      setState(prev => {
+          const advIndex = prev.adventurers.findIndex(a => a.id === adventurerId);
+          if (advIndex === -1) return prev;
+          
+          const adv = prev.adventurers[advIndex];
+          const node = adv.skillTree?.find(n => n.id === nodeId);
+          if (!node) return prev;
+
+          if (adv.skillPoints < node.cost) return prev;
+          if (adv.unlockedSkills.includes(nodeId)) return prev;
+
+          const newAdv = {
+              ...adv,
+              skillPoints: adv.skillPoints - node.cost,
+              unlockedSkills: [...adv.unlockedSkills, nodeId]
+          };
+
+          const newAdventurers = [...prev.adventurers];
+          newAdventurers[advIndex] = newAdv;
+          
+          return {
+              ...prev,
+              adventurers: newAdventurers
+          };
+      });
+  }, []);
+
+  // --- Game Loop ---
+  useEffect(() => {
+    const loop = setInterval(() => {
+        setState(prev => {
+            const now = Date.now();
+            let hasChanges = false;
+            let nextState = { ...prev };
+            
+            // 1. Process Finished Runs
+            const finishedRuns = prev.activeRuns.filter(r => now >= r.startTime + r.duration);
+            
+            if (finishedRuns.length > 0) {
+                hasChanges = true;
+                const newReports: DungeonReport[] = [];
+                let goldGained = 0;
+                let itemsToAdd: Item[] = [];
+                const materialsToAdd: Record<string, number> = {};
+
+                // Process each finished run
+                finishedRuns.forEach(run => {
+                    const dungeon = DUNGEONS.find(d => d.id === run.dungeonId);
+                    if (!dungeon) return;
+
+                    const enemy = ENEMIES[dungeon.enemyId];
+                    const snapshot = run.snapshot;
+                    
+                    // Rewards
+                    const baseGold = Math.floor(enemy.goldMin + Math.random() * (enemy.goldMax - enemy.goldMin));
+                    const baseXp = Math.floor(enemy.xpMin + Math.random() * (enemy.xpMax - enemy.xpMin));
+                    
+                    // Modifiers (e.g. Overpowered penalty)
+                    const isOverpowered = snapshot.power > (dungeon.recommendedPower * 3);
+                    
+                    let finalGold = baseGold * (1 + snapshot.goldBonus);
+                    let finalXp = baseXp * (1 + snapshot.xpBonus);
+
+                    if (isOverpowered && dungeon.type === ContractType.DUNGEON) {
+                        finalGold = enemy.goldMin * (1 + snapshot.goldBonus);
+                        finalXp = finalXp * 0.10;
+                    }
+
+                    goldGained += finalGold;
+
+                    // Distribute XP
+                    nextState.adventurers = nextState.adventurers.map(a => {
+                        if (run.adventurerIds.includes(a.id)) {
+                            let newXp = a.xp + Math.floor(finalXp / run.adventurerIds.length);
+                            let newLevel = a.level;
+                            let newPoints = a.skillPoints;
+                            
+                            // Level Up Logic
+                            while (newXp >= a.xpToNextLevel) {
+                                newXp -= a.xpToNextLevel;
+                                newLevel++;
+                                // Skill Point Logic: +1 every 3 levels starting at 5
+                                if (newLevel >= 5 && (newLevel - 5) % 3 === 0) {
+                                    newPoints++; 
+                                } else if (newLevel === 5) {
+                                    newPoints++;
+                                }
+                                // Update XP Req (Simple curve)
+                                // a.xpToNextLevel = Math.floor(100 * Math.pow(1.1, newLevel - 1));
+                            }
+                            // Recalculate req for next frame/render
+                            const nextReq = Math.floor(100 * Math.pow(1.15, newLevel - 1));
+
+                            return { 
+                                ...a, 
+                                xp: newXp, 
+                                level: newLevel, 
+                                xpToNextLevel: nextReq,
+                                skillPoints: newPoints
+                            };
+                        }
+                        return a;
+                    });
+
+                    // Item/Material Generation
+                    let runItems: Item[] = [];
+                    const runMaterials: Record<string, number> = {};
+
+                    // Number of "Rolls" or "Kills"
+                    let rolls = 1;
+                    if (dungeon.type === ContractType.DUNGEON) {
+                         const kills = Math.floor((snapshot.dps * (dungeon.durationSeconds)) / enemy.hp);
+                         rolls = Math.max(1, kills);
+                    } else {
+                         rolls = Math.floor(dungeon.durationSeconds / 5); 
+                    }
+                    
+                    // Modifiers affecting rolls
+                    const lootBonus = snapshot.lootBonus; 
+                    const adjustedTotalRolls = Math.max(1, Math.floor(rolls)); 
+                    
+                    // Filter Logic Helpers
+                    const filter = prev.lootFilter; 
+                    const isFilterActive = filter.unlocked && filter.enabled;
+                    const thresholdValue = RARITY_ORDER[filter.minRarity];
+
+                    const checkFilter = (item: Item): boolean => {
+                        if (!isFilterActive) return true;
+                        
+                        // 1. Stat Whitelist (Rescue)
+                        if (filter.matchAnyStat && filter.matchAnyStat.length > 0) {
+                            const hasMatchedStat = item.stats.some(s => filter.matchAnyStat.includes(s.name));
+                            if (hasMatchedStat) return true;
+                        }
+
+                        // 2. Check Rarity
+                        const itemRarityValue = RARITY_ORDER[item.rarity];
+                        if (itemRarityValue <= thresholdValue) return false;
+
+                        // 3. Check Type
+                        if (!filter.keepTypes.includes(item.type)) return false;
+
+                        return true;
+                    };
+
+                    let autoSalvagedCount = 0;
+                    let autoSalvagedGold = 0;
+
+                    for (let i = 0; i < adjustedTotalRolls; i++) {
+                        // Drop Check
+                        const roll = Math.random();
+                        const chance = dungeon.dropChance * (1 + lootBonus);
+                        
+                        if (roll < chance) {
+                            if (dungeon.type === ContractType.DUNGEON) {
+                                const newItem = generateItem(dungeon.level, prev.prestigeUpgrades);
+                                if (checkFilter(newItem)) {
+                                    runItems.push(newItem);
+                                } else {
+                                    autoSalvagedCount++;
+                                    autoSalvagedGold += newItem.value;
+                                }
+                            } else {
+                                if (dungeon.lootTable) {
+                                    const matId = dungeon.lootTable[Math.floor(Math.random() * dungeon.lootTable.length)];
+                                    runMaterials[matId] = (runMaterials[matId] || 0) + 1;
+                                }
+                            }
+                        }
+                    }
+
+                    // Add to aggregated lists
+                    itemsToAdd = [...itemsToAdd, ...runItems];
+                    goldGained += autoSalvagedGold; // Add salvage gold
+                    Object.entries(runMaterials).forEach(([k, v]) => {
+                        materialsToAdd[k] = (materialsToAdd[k] || 0) + v;
+                    });
+
+                    newReports.push({
+                        id: crypto.randomUUID(),
+                        dungeonName: dungeon.name,
+                        success: true,
+                        kills: rolls, // approx
+                        goldEarned: Math.floor(finalGold),
+                        xpEarned: Math.floor(finalXp),
+                        itemsFound: runItems,
+                        materialsFound: runMaterials,
+                        autoSalvagedCount,
+                        autoSalvagedGold,
+                        timestamp: now
+                    });
+                });
+
+                // Update Statistics
+                nextState.statistics.totalGoldEarned += goldGained;
+                nextState.statistics.dungeonsCleared += finishedRuns.length;
+                
+                // Update Inventory
+                const space = INVENTORY_SIZE - prev.inventory.length;
+                if (itemsToAdd.length > space) {
+                    itemsToAdd = itemsToAdd.slice(0, space);
+                }
+                nextState.inventory = [...prev.inventory, ...itemsToAdd];
+                nextState.gold += goldGained;
+
+                // Update Materials
+                Object.entries(materialsToAdd).forEach(([k, v]) => {
+                    nextState.materials[k] = (nextState.materials[k] || 0) + v;
+                });
+
+                // Update Reports (Keep last 5)
+                nextState.recentReports = [...newReports, ...prev.recentReports].slice(0, 5);
+
+                // Handle Repeats
+                const ongoingRuns: ActiveRun[] = [];
+                prev.activeRuns.forEach(r => {
+                    if (finishedRuns.find(fr => fr.id === r.id)) {
+                        // This run finished
+                        if (r.autoRepeat) {
+                             const dungeon = DUNGEONS.find(d => d.id === r.dungeonId);
+                             
+                             if (dungeon) {
+                                 // Regenerate Snapshot using nextState (updated levels/stats)
+                                 const snapshot = calculateRunSnapshot(r.adventurerIds, nextState);
+                                 
+                                 // Regenerate Adventurer State (Snapshot) with updated gear/levels
+                                 const adventurerState: Record<string, Adventurer> = {};
+                                 r.adventurerIds.forEach(id => {
+                                     const adv = nextState.adventurers.find(a => a.id === id);
+                                     if (adv) adventurerState[id] = JSON.parse(JSON.stringify(adv));
+                                 });
+
+                                 // Recalculate Duration (if skills/speed changed)
+                                 const duration = calculateDungeonDuration(dungeon.durationSeconds * 1000, nextState, r.adventurerIds);
+
+                                // Restart with FRESH snapshot and empty modifiedSlots
+                                const newRun: ActiveRun = {
+                                    id: crypto.randomUUID(),
+                                    dungeonId: r.dungeonId,
+                                    adventurerIds: r.adventurerIds,
+                                    startTime: now,
+                                    duration: duration,
+                                    runsRemaining: -1,
+                                    totalRuns: r.totalRuns + 1,
+                                    autoRepeat: true,
+                                    snapshot: snapshot,
+                                    adventurerState: adventurerState,
+                                    modifiedSlots: {} // Reset pending modifications
+                                };
+                                ongoingRuns.push(newRun);
+                             } else {
+                                 // Fail-safe if dungeon somehow missing
+                                 ongoingRuns.push(r);
+                             }
+                        }
+                    } else {
+                        // Still running
+                        ongoingRuns.push(r);
+                    }
+                });
+                
+                nextState.activeRuns = ongoingRuns;
+            }
+
+            return hasChanges ? nextState : prev;
+        });
+    }, 1000); // 1s Tick
+
+    return () => clearInterval(loop);
   }, []);
 
   return (
-    <GameContext.Provider value={{ state, startDungeon, cancelDungeon, stopRepeat, dismissReport, equipItem, unequipItem, salvageItem, salvageManyItems, buyUpgrade, recruitAdventurer, importSave, doPrestige, buyPrestigeUpgrade, enchantItem, rerollStat, unlockSkill, renameAdventurer }}>
+    <GameContext.Provider value={{
+      state,
+      recruitAdventurer,
+      renameAdventurer,
+      startDungeon,
+      cancelDungeon,
+      stopRepeat,
+      salvageItem,
+      salvageManyItems,
+      equipItem,
+      unequipItem,
+      buyUpgrade,
+      buyPrestigeUpgrade,
+      doPrestige,
+      unlockLootFilter,
+      updateLootFilter,
+      enchantItem,
+      rerollStat,
+      dismissReport,
+      importSave,
+      unlockSkill
+    }}>
       {children}
     </GameContext.Provider>
   );

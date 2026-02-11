@@ -222,7 +222,17 @@ export interface DungeonReport {
   xpEarned: number;
   itemsFound: Item[];
   materialsFound: Record<string, number>; // New field for mats
+  autoSalvagedCount: number; // New: Number of items caught by filter
+  autoSalvagedGold: number; // New: Gold from filter
   timestamp: number;
+}
+
+export interface LootFilterSettings {
+    unlocked: boolean;
+    enabled: boolean;
+    minRarity: Rarity; // Keep items >= this rarity
+    keepTypes: ItemType[]; // Keep these types
+    matchAnyStat: string[]; // If NOT empty, item MUST contain one of these stats to be kept (regardless of rarity/type rules, or additive? Usually additive 'AND' logic or 'OR' override. Let's do: Standard Filter AND (Stats Match OR Stats Empty))
 }
 
 export interface GameState {
@@ -235,6 +245,7 @@ export interface GameState {
   unlockedDungeons: string[]; 
   upgrades: { [id: string]: number }; 
   prestigeUpgrades: { [id: string]: number }; // New field
+  lootFilter: LootFilterSettings; // New field
   lastParties: Record<string, string[]>; 
   recentReports: DungeonReport[]; 
   lastSaveTime: number;
