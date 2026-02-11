@@ -42,41 +42,99 @@ export interface Skill {
   unlockLevel: number;
 }
 
-// --- NEW HYBRID SYSTEM TYPES ---
+// --- NEW TRAIT SYSTEM ---
+
+export type TraitType = 'COMBAT' | 'GATHERING' | 'FISHING' | 'HYBRID';
+
+export interface Trait {
+    id: string;
+    name: string;
+    description: string;
+    rarity: 'Common' | 'Rare' | 'Epic';
+    type: TraitType;
+    effect: (stats: any) => void;
+}
 
 export interface AdventurerTrait {
     id: string;
     name: string;
     description: string;
-    effect: (stats: any, state: any) => void; // Mutates stats object
+    effect: (stats: any, state: any) => void; 
 }
 
 export type SkillModifier = 
     | 'NONE'
-    | 'WEAPON_MASTER' // Rule: Weapon Stats Doubled, Cannot equip Trinkets
-    | 'RESOURCE_SCAVENGER' // Rule: Drops Materials instead of Items
-    | 'GAMBLER' // Rule: +2 Loot Rolls, -50% Gold Rewards
-    | 'METHODICAL' // Rule: +50% Rewards, +20% Dungeon Duration
-    | 'RUSH' // +25% Speed, -15% Health (Stat mod)
-    | 'TITAN_GRIP' // +20% Damage, +20% Health, -10% Speed (Stat mod)
-    | 'GLASS_CANNON' // +40% Damage, -20% Health (Stat mod)
-    | 'GOLDEN_TOUCH'; // +50% Gold, -10% Damage (Stat mod)
+    | 'WEAPON_MASTER' 
+    | 'RESOURCE_SCAVENGER' 
+    | 'GAMBLER' 
+    | 'METHODICAL' 
+    | 'RUSH' 
+    | 'TITAN_GRIP' 
+    | 'GLASS_CANNON' 
+    | 'GOLDEN_TOUCH' 
+    | 'SPEED_DEMON' 
+    | 'BOSS_KILLER' 
+    | 'LOGISTICIAN'; 
+
+export interface SkillTemplate {
+    name: string;
+    description: string;
+    icon: string;
+    effectType: 'STAT' | 'ECONOMY' | 'SPEED' | 'MODIFIER';
+    effectValue: number;
+    statTarget?: string;
+    exclusiveGroup?: string;
+    modifier?: SkillModifier;
+    poolType?: TraitType; // For generation bias
+}
 
 export interface SkillNode {
     id: string;
     name: string;
     description: string;
-    icon: string; // Icon name for Lucide
-    x: number; // For visual layout (grid col)
-    y: number; // For visual layout (grid row)
-    requires: string[]; // IDs of prerequisite nodes
-    maxLevel: number; // Usually 1 for small trees
+    icon: string; 
+    x: number; 
+    y: number; 
+    requires: string[]; 
+    maxLevel: number; 
     cost: number;
     effectType: 'STAT' | 'ECONOMY' | 'SPEED' | 'MODIFIER';
-    effectValue: number; // e.g., 0.10 for 10%
-    statTarget?: string; // 'damage', 'health', 'gold', etc.
-    exclusiveGroup?: string; // If set, unlocking this node locks others in the same group
-    modifier?: SkillModifier; // Special behavior flag
+    effectValue: number; 
+    statTarget?: string; 
+    exclusiveGroup?: string; 
+    modifier?: SkillModifier; 
+}
+
+// --- REALM EVOLUTION SYSTEM ---
+
+export interface RealmModifier {
+    id: string;
+    name: string;
+    description: string;
+    unlockRank: number;
+    enemyPowerMult: number; // Multiplies base requirement
+    lootYieldMult: number; // Multiplies gold/xp
+    rarityShiftBonus: number; // Adds to rarity weights
+}
+
+export interface RealmState {
+    realmRank: number;
+    realmExperience: number;
+    // Map of DungeonID -> Array of Active Modifier IDs
+    activeModifiers: Record<string, string[]>;
+}
+
+// --- GUILD MASTERY SYSTEM (PERMANENT) ---
+
+export interface MasteryTrack {
+    level: number;
+    xp: number;
+}
+
+export interface GuildMastery {
+    combat: MasteryTrack;
+    gathering: MasteryTrack;
+    fishing: MasteryTrack;
 }
 
 // -------------------------------
@@ -85,15 +143,15 @@ export interface ItemStat {
   name: string;
   value: number;
   isPercentage: boolean;
-  tier: number; // 1 (Best) to 7 (Worst)
+  tier: number; // 0 (Unique/Bonus), 1 (Best) to 7 (Worst)
 }
 
 export interface Item {
   id: string;
   name: string;
   type: ItemType;
-  subtype: WeaponType; // New field
-  classRestriction: AdventurerRole[]; // New field: Which classes can use this
+  subtype: WeaponType; 
+  classRestriction: AdventurerRole[]; 
   rarity: Rarity;
   level: number;
   stats: ItemStat[];
@@ -111,23 +169,33 @@ export interface Material {
 export interface Adventurer {
   id: string;
   name: string;
-  title: string; // New field for role/flavor title
+  title: string; 
   role: AdventurerRole;
   rarity: Rarity;
-  level: number;
+  
+  // Combat Skill (Primary)
+  level: number; 
   xp: number;
   xpToNextLevel: number;
   
-  // Proficiency XP
+  // Proficiency Skills
+  gatheringLevel: number;
   gatheringXp: number;
+  
+  fishingLevel: number;
   fishingXp: number;
 
   // Hybrid System Fields
-  traitId: string; // The permanent archetype
-  skillPoints: number; // Available points
-  unlockedSkills: string[]; // IDs of unlocked nodes from their Role tree
-  skillTree: SkillNode[]; // New: Unique tree for this adventurer
-  archetype?: string; // Flavor name for the generated tree (e.g. "Berserker")
+  traits: Trait[]; // The 3 generated traits
+  specialization: string; // "Battle Mage", "Angler", etc.
+  
+  // Legacy support (to be deprecated or mapped)
+  traitId: string; 
+
+  skillPoints: number; 
+  unlockedSkills: string[]; 
+  skillTree: SkillNode[]; 
+  archetype?: string; 
 
   slots: {
     [ItemType.WEAPON]: Item | null;
@@ -152,17 +220,28 @@ export interface Enemy {
   goldMax: number;
 }
 
+export interface UnlockRequirements {
+    minPower?: number;
+    minGuildLevel?: number;
+    minAscension?: number;
+    previousDungeonId?: string;
+    previousDungeonClears?: number;
+    goldCost?: number;
+}
+
 export interface Dungeon {
   id: string;
   name: string;
-  type: ContractType; // New Field
-  level: number;
+  type: ContractType; 
+  tier: number; 
+  level: number; 
   description: string;
   durationSeconds: number;
-  enemyId: string; // Used for visuals/difficulty scaling even in gathering
-  dropChance: number; // For gathering: Material yield chance/multiplier
-  recommendedPower: number;
-  lootTable?: string[]; // IDs of materials that can drop
+  enemyId: string; 
+  dropChance: number; 
+  recommendedPower: number; 
+  lootTable?: string[]; 
+  unlockReq?: UnlockRequirements; 
 }
 
 export interface RunSnapshot {
@@ -171,7 +250,7 @@ export interface RunSnapshot {
     goldBonus: number;
     xpBonus: number;
     lootBonus: number;
-    activeModifiers: string[]; // Track active rules for this run
+    activeModifiers: string[]; 
 }
 
 export interface ActiveRun {
@@ -184,9 +263,7 @@ export interface ActiveRun {
   totalRuns: number;
   autoRepeat: boolean; 
   snapshot: RunSnapshot;
-  // Snapshot of the specific adventurers (stats/gear) at the start of the run
   adventurerState: Record<string, Adventurer>;
-  // Tracks slots that have been changed during the run (to force Pending state)
   modifiedSlots?: Record<string, ItemType[]>;
 }
 
@@ -206,7 +283,7 @@ export interface PrestigeUpgrade {
     id: string;
     name: string;
     description: string;
-    cost: number; // In Prestige Currency
+    cost: number; 
     costMultiplier: number;
     level: number;
     maxLevel: number;
@@ -221,31 +298,44 @@ export interface DungeonReport {
   goldEarned: number;
   xpEarned: number;
   itemsFound: Item[];
-  materialsFound: Record<string, number>; // New field for mats
-  autoSalvagedCount: number; // New: Number of items caught by filter
-  autoSalvagedGold: number; // New: Gold from filter
+  materialsFound: Record<string, number>; 
+  autoSalvagedCount: number; 
+  autoSalvagedGold: number; 
   timestamp: number;
+  realmXpEarned?: number; // New field
 }
 
 export interface LootFilterSettings {
     unlocked: boolean;
     enabled: boolean;
-    minRarity: Rarity; // Keep items >= this rarity
-    keepTypes: ItemType[]; // Keep these types
-    matchAnyStat: string[]; // If NOT empty, item MUST contain one of these stats to be kept (regardless of rarity/type rules, or additive? Usually additive 'AND' logic or 'OR' override. Let's do: Standard Filter AND (Stats Match OR Stats Empty))
+    minRarity: Rarity; 
+    keepTypes: ItemType[]; 
+    matchAnyStat: string[]; 
 }
 
 export interface GameState {
+  // --- RUN STATE ---
   gold: number;
-  prestigeCurrency: number;
   adventurers: Adventurer[];
+  recruitmentPool: Adventurer[]; // TAVERN POOL
+  refreshCost: number;
   inventory: Item[];
-  materials: Record<string, number>; // New field: Material ID -> Quantity
   activeRuns: ActiveRun[];
+  materials: Record<string, number>;
+  
+  // --- META STATE ---
+  prestigeCurrency: number;
+  ascensionCount: number; 
   unlockedDungeons: string[]; 
   upgrades: { [id: string]: number }; 
-  prestigeUpgrades: { [id: string]: number }; // New field
-  lootFilter: LootFilterSettings; // New field
+  prestigeUpgrades: { [id: string]: number }; 
+  guildMastery: GuildMastery; // Permanent Mastery Tracks
+  
+  // --- WORLD EVOLUTION (PERMANENT) ---
+  realm: RealmState;
+
+  // --- SETTINGS / MISC ---
+  lootFilter: LootFilterSettings; 
   lastParties: Record<string, string[]>; 
   recentReports: DungeonReport[]; 
   lastSaveTime: number;
@@ -253,5 +343,7 @@ export interface GameState {
     totalGoldEarned: number;
     monstersKilled: number;
     dungeonsCleared: number;
+    dungeonClears: Record<string, number>; 
   };
+  legendaryPityCounter: number; 
 }

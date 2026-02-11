@@ -9,18 +9,17 @@ import { Tooltip, SkillTooltipContent } from './Tooltip';
 import { ItemIcon } from './ItemIcon';
 import { ItemDetailsModal } from './ItemDetailsModal';
 import { SkillTreeModal } from './SkillTreeModal';
+import { RecruitmentModal } from './RecruitmentModal';
 
 export const AdventurerList: React.FC = () => {
-  const { state, recruitAdventurer, renameAdventurer } = useGame();
+  const { state, renameAdventurer } = useGame();
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [skillTreeAdventurer, setSkillTreeAdventurer] = useState<Adventurer | null>(null);
+  const [showRecruitment, setShowRecruitment] = useState(false);
   
   // Renaming State
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-
-  const recruitCost = 100 * Math.pow(5, state.adventurers.length - 1);
-  const canRecruit = state.gold >= recruitCost;
 
   const handleStartRename = (adv: Adventurer) => {
       setEditingId(adv.id);
@@ -51,6 +50,10 @@ export const AdventurerList: React.FC = () => {
           />
       )}
 
+      {showRecruitment && (
+          <RecruitmentModal onClose={() => setShowRecruitment(false)} />
+      )}
+
       {/* Header */}
       <div className="flex justify-between items-center bg-slate-900/50 p-4 rounded-lg border border-slate-800">
         <div>
@@ -58,16 +61,11 @@ export const AdventurerList: React.FC = () => {
             <p className="text-sm text-slate-500">{state.adventurers.length} active contractors</p>
         </div>
         <button 
-          onClick={recruitAdventurer}
-          disabled={!canRecruit}
-          className={`flex items-center gap-2 px-4 py-2 rounded text-sm font-bold transition-all shadow-lg ${
-              canRecruit 
-                ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-900/20 transform hover:scale-105' 
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-          }`}
+          onClick={() => setShowRecruitment(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded text-sm font-bold transition-all shadow-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-900/20 transform hover:scale-105"
         >
             <UserPlus size={16} />
-            Recruit ({formatNumber(recruitCost)}g)
+            Visit Tavern
         </button>
       </div>
 
@@ -89,8 +87,7 @@ export const AdventurerList: React.FC = () => {
           const isWeaponMaster = activeModifiers.includes('WEAPON_MASTER');
 
           const roleConfig = ROLE_CONFIG[adv.role];
-          const skills = CLASS_SKILLS[adv.role];
-          const trait = ADVENTURER_TRAITS.find(t => t.id === adv.traitId);
+          const legacyTrait = ADVENTURER_TRAITS.find(t => t.id === adv.traitId);
           
           const rarityBorder = {
               'Common': 'border-slate-700',
@@ -167,17 +164,25 @@ export const AdventurerList: React.FC = () => {
                       <div className="bg-indigo-500 h-full" style={{ width: `${Math.min(100, (adv.xp / adv.xpToNextLevel) * 100)}%` }}></div>
                   </div>
 
-                  {/* Trait & Tree Access */}
+                  {/* Traits & Tree Access */}
                   <div className="flex items-center justify-between gap-2">
-                       {/* Trait Pill */}
-                       {trait ? (
-                            <Tooltip content={<div className="text-xs"><div className="font-bold text-emerald-300">{trait.name}</div><div className="text-slate-400">{trait.description}</div></div>}>
-                                <div className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded bg-slate-900/60 border border-slate-700 text-emerald-300 cursor-help">
-                                    <Dna size={10} />
-                                    <span>{trait.name}</span>
-                                </div>
-                            </Tooltip>
-                       ) : <div />}
+                       {/* Traits Pill (New System) */}
+                       <div className="flex gap-1 overflow-x-auto no-scrollbar max-w-[65%]">
+                           {adv.traits ? adv.traits.map(trait => (
+                               <Tooltip key={trait.id} content={<div className="text-xs"><div className="font-bold text-white">{trait.name}</div><div className="text-slate-400">{trait.description}</div></div>}>
+                                   <div className={`flex-shrink-0 w-6 h-6 rounded flex items-center justify-center border bg-slate-900 cursor-help ${trait.type === 'COMBAT' ? 'border-red-900/50 text-red-400' : trait.type === 'GATHERING' ? 'border-emerald-900/50 text-emerald-400' : trait.type === 'FISHING' ? 'border-blue-900/50 text-blue-400' : 'border-purple-900/50 text-purple-400'}`}>
+                                       <Dna size={12} />
+                                   </div>
+                               </Tooltip>
+                           )) : legacyTrait && (
+                                <Tooltip content={<div className="text-xs"><div className="font-bold text-emerald-300">{legacyTrait.name}</div><div className="text-slate-400">{legacyTrait.description}</div></div>}>
+                                    <div className="flex items-center gap-1.5 text-[10px] px-2 py-1 rounded bg-slate-900/60 border border-slate-700 text-emerald-300 cursor-help">
+                                        <Dna size={10} />
+                                        <span>{legacyTrait.name}</span>
+                                    </div>
+                                </Tooltip>
+                           )}
+                       </div>
 
                        {/* Tree Button */}
                        <button 

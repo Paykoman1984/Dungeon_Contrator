@@ -1,13 +1,14 @@
 
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
-import { DUNGEONS, ENEMIES, MATERIALS } from '../constants';
-import { calculateAdventurerPower, calculateConservativePower, calculateDungeonDuration, calculatePartyDps, formatNumber } from '../utils/gameMath';
-import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Fish } from 'lucide-react';
+import { DUNGEONS, ENEMIES, MATERIALS, REALM_MODIFIERS } from '../constants';
+import { calculateAdventurerPower, calculateConservativePower, calculateDungeonDuration, calculatePartyDps, formatNumber, getRealmBonuses, calculateEffectiveDungeonStats } from '../utils/gameMath';
+import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Lock, AlertOctagon, CheckSquare, Square as UncheckedSquare } from 'lucide-react';
 import { ContractType, AdventurerRole } from '../types';
+import { DungeonProgressBar } from './DungeonProgressBar';
 
 export const DungeonList: React.FC = () => {
-  const { state, startDungeon, cancelDungeon, stopRepeat } = useGame();
+  const { state, startDungeon, cancelDungeon, stopRepeat, toggleDungeonModifier } = useGame();
   const [configuringDungeon, setConfiguringDungeon] = useState<string | null>(null);
   const [selectedAdvIds, setSelectedAdvIds] = useState<string[]>([]);
   const [isAutoRepeat, setIsAutoRepeat] = useState<boolean>(false);
@@ -100,6 +101,8 @@ export const DungeonList: React.FC = () => {
           const isConfiguring = configuringDungeon === dungeon.id;
           const duration = calculateDungeonDuration(dungeon.durationSeconds, state);
           const enemy = ENEMIES[dungeon.enemyId];
+          
+          const isUnlocked = state.unlockedDungeons.includes(dungeon.id);
 
           // Stats Calculation (for setup)
           const currentPartyDps = calculatePartyDps(selectedAdvIds, state);
@@ -110,6 +113,10 @@ export const DungeonList: React.FC = () => {
           
           const isCombat = dungeon.type === ContractType.DUNGEON;
 
+          // Realm Effective Stats
+          const realmStats = calculateEffectiveDungeonStats(dungeon, state.realm);
+          const effectivePowerReq = realmStats.recommendedPower;
+
           // Estimate Kills / Yield
           let estimatedKills = Math.floor((currentPartyDps * duration) / enemy.hp);
           if (!isCombat) {
@@ -118,18 +125,22 @@ export const DungeonList: React.FC = () => {
           }
           
           // Overpowered check (Diminishing Returns)
-          const isOverpowered = currentPartyPower > (dungeon.recommendedPower * 3);
+          const isOverpowered = currentPartyPower > (effectivePowerReq * 3);
           // Requirement check
-          const meetsPowerRequirement = currentPartyPower >= dungeon.recommendedPower;
+          const meetsPowerRequirement = currentPartyPower >= effectivePowerReq;
           const lowPower = !isCombat && !meetsPowerRequirement; // Gathering allows low power but penalizes
 
           // Estimate Averages for display
           let avgGold = (enemy.goldMin + enemy.goldMax) / 2;
           let avgXp = (enemy.xpMin + enemy.xpMax) / 2;
           
+          // Apply Realm Multiplier to Estimate
+          avgGold *= realmStats.lootMultiplier;
+          avgXp *= realmStats.lootMultiplier;
+
           if (isCombat && isOverpowered) {
-              avgGold = enemy.goldMin;
-              avgXp = avgXp * 0.10;
+              avgGold = enemy.goldMin * realmStats.lootMultiplier;
+              avgXp = (avgXp * 0.10); // Penalty is harsh on base
           }
 
           const totalEstGold = estimatedKills * avgGold;
@@ -139,6 +150,36 @@ export const DungeonList: React.FC = () => {
           const busyMembers = state.adventurers.filter(a => selectedAdvIds.includes(a.id) && state.activeRuns.some(r => r.adventurerIds.includes(a.id)));
           const isPartyBusy = busyMembers.length > 0;
 
+          // Available Modifiers for this dungeon
+          const unlockedModifiers = REALM_MODIFIERS.filter(m => state.realm.realmRank >= m.unlockRank);
+          const activeMods = state.realm.activeModifiers[dungeon.id] || [];
+
+          // Render Locked State
+          if (!isUnlocked) {
+              return (
+                  <div key={dungeon.id} className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex items-center justify-between opacity-60 grayscale group hover:opacity-80 transition-opacity">
+                      <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded bg-slate-950 flex items-center justify-center border border-slate-800">
+                              <Lock size={20} className="text-slate-600" />
+                          </div>
+                          <div>
+                              <h3 className="text-slate-400 font-bold flex items-center gap-2">
+                                  {dungeon.name} 
+                                  <span className="text-xs bg-slate-950 px-2 py-0.5 rounded border border-slate-800">Tier {dungeon.tier}</span>
+                              </h3>
+                              <p className="text-xs text-slate-600">Locked Region</p>
+                          </div>
+                      </div>
+                      <div className="text-right text-xs text-slate-500 font-mono">
+                          {dungeon.unlockReq?.minPower && <div>Requires {dungeon.unlockReq.minPower} Total Power</div>}
+                          {dungeon.unlockReq?.minGuildLevel && <div>Requires Guild Level {dungeon.unlockReq.minGuildLevel}</div>}
+                          {dungeon.unlockReq?.minAscension && <div>Requires Ascension {dungeon.unlockReq.minAscension}</div>}
+                      </div>
+                  </div>
+              )
+          }
+
+          // Render Unlocked State
           return (
             <div key={dungeon.id} className={`bg-slate-800 border ${isConfiguring ? 'border-indigo-500 ring-1 ring-indigo-500/50' : 'border-slate-700'} rounded-lg overflow-hidden group relative transition-all`}>
                
@@ -148,6 +189,11 @@ export const DungeonList: React.FC = () => {
                             <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
                                 {dungeon.name}
                                 <span className="text-xs bg-slate-900 text-slate-400 px-2 py-0.5 rounded">Lvl {dungeon.level}</span>
+                                {activeMods.length > 0 && (
+                                    <span className="text-[10px] bg-red-900/30 text-red-300 px-2 py-0.5 rounded border border-red-900/50 flex items-center gap-1">
+                                        <AlertOctagon size={10} /> {activeMods.length} Mutations
+                                    </span>
+                                )}
                             </h3>
                             <p className="text-slate-400 text-sm">{dungeon.description}</p>
                             
@@ -156,17 +202,17 @@ export const DungeonList: React.FC = () => {
                                 {isCombat ? (
                                     <span className="flex items-center gap-1 text-red-300"><Skull size={12}/> {enemy.name} ({formatNumber(enemy.hp)} HP)</span>
                                 ) : (
-                                    <span className="flex items-center gap-1 text-slate-400"><AlertTriangle size={12}/> Difficulty: {dungeon.recommendedPower}</span>
+                                    <span className="flex items-center gap-1 text-slate-400"><AlertTriangle size={12}/> Difficulty: {effectivePowerReq}</span>
                                 )}
                                 <span className={`flex items-center gap-1 border px-1.5 py-0.5 rounded ${isCombat ? 'text-orange-300 border-orange-900/50 bg-orange-900/20' : 'text-emerald-300 border-emerald-900/50 bg-emerald-900/20'}`}>
                                     {isCombat ? <Swords size={12}/> : <Leaf size={12} />} 
-                                    {isCombat ? 'Rec.' : 'Req.'} {dungeon.recommendedPower} Power
+                                    {isCombat ? 'Rec.' : 'Req.'} {effectivePowerReq} Power
                                 </span>
                             </div>
                             
                             {/* Reward Info */}
                             <div className="flex gap-3 mt-1 text-[10px] text-slate-600">
-                                <span>Rewards:</span>
+                                <span>Base Rewards:</span>
                                 {isCombat ? (
                                     <>
                                         <span className="text-yellow-600">{enemy.goldMin}-{enemy.goldMax} Gold</span>
@@ -210,8 +256,6 @@ export const DungeonList: React.FC = () => {
                            <div className="space-y-2">
                                {dungeonRuns.map((run) => {
                                    const activeAdventurers = state.adventurers.filter(a => run.adventurerIds.includes(a.id));
-                                   const now = Date.now();
-                                   const progress = Math.min(100, ((now - run.startTime) / run.duration) * 100);
                                    const isInfinite = run.autoRepeat;
                                    
                                    // Real-time projected kills for this run (visual only)
@@ -221,10 +265,12 @@ export const DungeonList: React.FC = () => {
 
                                    return (
                                        <div key={run.id} className="bg-slate-900/50 rounded p-2 border border-slate-700/50 flex items-start gap-3 relative overflow-hidden group/run">
-                                           {/* Progress Bar Background */}
-                                           <div className="absolute bottom-0 left-0 h-0.5 bg-indigo-500/30 w-full">
-                                                <div className="h-full bg-indigo-500 transition-all duration-200" style={{ width: `${progress}%` }}></div>
-                                           </div>
+                                           {/* High Performance Progress Bar */}
+                                           <DungeonProgressBar 
+                                               startTime={run.startTime} 
+                                               duration={run.duration} 
+                                               isAutoRepeat={run.autoRepeat} 
+                                           />
                                            
                                            <div className="flex-1 min-w-0">
                                                {/* Vertical Adventurer List */}
@@ -299,6 +345,33 @@ export const DungeonList: React.FC = () => {
                    {isConfiguring && (
                        <div className="mt-6 pt-4 border-t border-slate-700 animate-in fade-in slide-in-from-top-2 duration-200">
                            
+                           {/* World Mutators Section */}
+                           {unlockedModifiers.length > 0 && (
+                               <div className="mb-4 bg-cyan-950/20 p-3 rounded border border-cyan-900/30">
+                                   <div className="flex items-center gap-2 text-xs font-bold text-cyan-400 mb-2 uppercase tracking-wider">
+                                       <AlertOctagon size={12} /> World Mutations
+                                   </div>
+                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                       {unlockedModifiers.map(mod => {
+                                           const isActive = activeMods.includes(mod.id);
+                                           return (
+                                               <button
+                                                   key={mod.id}
+                                                   onClick={() => toggleDungeonModifier(dungeon.id, mod.id)}
+                                                   className={`flex items-center justify-between p-2 rounded border text-left transition-all ${isActive ? 'bg-red-900/30 border-red-500/50 text-white' : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-600'}`}
+                                               >
+                                                   <div>
+                                                       <div className="text-xs font-bold">{mod.name}</div>
+                                                       <div className="text-[10px] opacity-70">Diff x{mod.enemyPowerMult} • Loot x{mod.lootYieldMult}</div>
+                                                   </div>
+                                                   {isActive ? <CheckSquare size={14} className="text-red-400" /> : <UncheckedSquare size={14} />}
+                                               </button>
+                                           );
+                                       })}
+                                   </div>
+                               </div>
+                           )}
+
                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                                {/* Assigned Party */}
                                <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700/50 flex flex-col">
@@ -427,7 +500,7 @@ export const DungeonList: React.FC = () => {
                                    {isCombat && !meetsPowerRequirement && selectedAdvIds.length > 0 && (
                                        <div className="flex items-center gap-2 text-[10px] text-amber-400 font-bold bg-amber-900/20 px-2 py-1 rounded border border-amber-900/30">
                                            <AlertTriangle size={12} />
-                                           <span>Insufficient Power! Recommended: {dungeon.recommendedPower}</span>
+                                           <span>Insufficient Power! Recommended: {effectivePowerReq}</span>
                                        </div>
                                    )}
                                    
@@ -488,7 +561,7 @@ export const DungeonList: React.FC = () => {
                                             ) : (
                                                 <>
                                                  <AlertTriangle size={16} />
-                                                 <span>Need {dungeon.recommendedPower} Power</span>
+                                                 <span>Need {effectivePowerReq} Power</span>
                                                 </>
                                             )
                                        ) : (
@@ -498,7 +571,7 @@ export const DungeonList: React.FC = () => {
                                            </>
                                        )}
                                    </button>
-                               </div>
+                                </div>
                            </div>
                        </div>
                    )}

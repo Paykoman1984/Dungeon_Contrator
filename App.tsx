@@ -6,19 +6,20 @@ import { AdventurerList } from './components/AdventurerList';
 import { InventoryPanel } from './components/InventoryPanel';
 import { GuildPanel } from './components/GuildPanel';
 import { PrestigePanel } from './components/PrestigePanel';
+import { RealmPanel } from './components/RealmPanel';
 import { DungeonResultModal } from './components/DungeonResultModal';
 import { SaveLoadModal } from './components/SaveLoadModal';
+import { RealmLevelUpModal } from './components/RealmLevelUpModal';
 import { formatNumber, calculateConservativePower } from './utils/gameMath';
 import { INVENTORY_SIZE } from './constants';
-import { LayoutDashboard, Users, Swords, Package, Landmark, Settings, Crown } from 'lucide-react';
+import { LayoutDashboard, Users, Swords, Package, Landmark, Crown, Globe } from 'lucide-react';
 
 const AppContent: React.FC = () => {
   const { state } = useGame();
-  const [view, setView] = useState<'DASHBOARD' | 'ADVENTURERS' | 'INVENTORY' | 'GUILD' | 'PRESTIGE'>('DASHBOARD');
+  const [view, setView] = useState<'DASHBOARD' | 'ADVENTURERS' | 'INVENTORY' | 'GUILD' | 'PRESTIGE' | 'REALM'>('DASHBOARD');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Calculate Total Power using CONSERVATIVE stats via helper
-  // This ensures that modified slots during a run contribute 0 power (Pending state)
   const totalGuildPower = state.adventurers.reduce((sum, adv) => {
       return sum + calculateConservativePower(adv, state);
   }, 0);
@@ -26,6 +27,7 @@ const AppContent: React.FC = () => {
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
       <DungeonResultModal />
+      <RealmLevelUpModal />
       <SaveLoadModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       
       {/* Sidebar */}
@@ -64,6 +66,13 @@ const AppContent: React.FC = () => {
             icon={<Landmark size={20} />} 
             label="Guild Ops" 
           />
+          <SidebarItem 
+            active={view === 'REALM'} 
+            onClick={() => setView('REALM')} 
+            icon={<Globe size={20} />} 
+            label="Realm" 
+            badge={state.realm.realmRank > 0 ? `R${state.realm.realmRank}` : undefined}
+          />
           
           <div className="h-px bg-slate-800 my-2"></div>
           
@@ -92,14 +101,6 @@ const AppContent: React.FC = () => {
                     {formatNumber(totalGuildPower)} <span className="text-sm text-red-600">PWR</span>
                 </div>
             </div>
-            
-            <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="w-full flex items-center justify-center md:justify-start gap-2 text-slate-500 hover:text-white transition-colors text-sm pt-2"
-            >
-                <Settings size={16} />
-                <span className="hidden md:inline">Manage Save</span>
-            </button>
         </div>
       </div>
 
@@ -119,6 +120,7 @@ const AppContent: React.FC = () => {
              {view === 'INVENTORY' && <InventoryPanel />}
              {view === 'GUILD' && <GuildPanel />}
              {view === 'PRESTIGE' && <PrestigePanel />}
+             {view === 'REALM' && <RealmPanel />}
           </div>
       </main>
     </div>
@@ -136,7 +138,7 @@ const SidebarItem: React.FC<{ active: boolean; onClick: () => void; icon: React.
         {icon}
         <span className="hidden md:block font-medium">{label}</span>
         {badge && (
-            <span className="absolute top-2 right-2 md:top-auto md:bottom-auto md:right-3 w-2 h-2 md:w-auto md:h-auto bg-purple-500 text-white text-[10px] px-1.5 py-0.5 rounded-full md:rounded font-bold flex items-center justify-center">
+            <span className="absolute top-2 right-2 md:top-auto md:bottom-auto md:right-3 w-auto min-w-[1.25rem] h-5 bg-purple-500 text-white text-[10px] px-1.5 py-0.5 rounded-full md:rounded font-bold flex items-center justify-center shadow-lg">
                 {badge === '!' ? '' : badge}
             </span>
         )}
