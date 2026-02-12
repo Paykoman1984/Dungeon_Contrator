@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Adventurer, SkillNode } from '../types';
-import { X, Check, Lock, Heart, Sword, Coins, Skull, Shield, Zap, Crosshair, Box, Eye, Sparkles, Flame, Book, Star, Crown, Beaker, MousePointerClick, Gem, AlertOctagon, Dices, RefreshCw } from 'lucide-react';
+import { X, Check, Lock, Heart, Sword, Coins, Skull, Shield, Zap, Crosshair, Box, Eye, Sparkles, Flame, Book, Star, Crown, Beaker, MousePointerClick, Gem, AlertOctagon, Dices, RefreshCw, Ban } from 'lucide-react';
 import { formatNumber } from '../utils/gameMath';
 
 interface SkillTreeModalProps {
@@ -46,6 +46,7 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
     // Determine selection status
     let canUnlockSelected = false;
     let isSelectedUnlocked = false;
+    let isGroupLocked = false;
     
     if (selectedNode) {
         isSelectedUnlocked = liveAdventurer.unlockedSkills.includes(selectedNode.id);
@@ -54,7 +55,15 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
         // Check if ANY parent is unlocked or if requires is empty
         const hasParentUnlocked = selectedNode.requires.length === 0 || selectedNode.requires.some(req => liveAdventurer.unlockedSkills.includes(req));
 
-        canUnlockSelected = !isSelectedUnlocked && hasParentUnlocked && liveAdventurer.skillPoints >= selectedNode.cost;
+        // Exclusive Logic
+        if (selectedNode.exclusiveGroup) {
+             isGroupLocked = liveAdventurer.unlockedSkills.some(id => {
+                  const s = tree.find(n => n.id === id);
+                  return s && s.exclusiveGroup === selectedNode.exclusiveGroup && s.id !== selectedNode.id;
+             });
+        }
+
+        canUnlockSelected = !isSelectedUnlocked && !isGroupLocked && hasParentUnlocked && liveAdventurer.skillPoints >= selectedNode.cost;
     }
 
     // Render Connections (Lines)
@@ -137,9 +146,19 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                 
                                 const isReachable = !isUnlocked && hasParentUnlocked;
                                 const canAfford = liveAdventurer.skillPoints >= node.cost;
-                                const isLocked = !isUnlocked && !isReachable;
                                 const isSelected = selectedNodeId === node.id;
                                 const isModifier = node.effectType === 'MODIFIER';
+
+                                // Locked Logic for visual
+                                let nodeGroupLocked = false;
+                                if (node.exclusiveGroup) {
+                                     nodeGroupLocked = liveAdventurer.unlockedSkills.some(id => {
+                                          const s = tree.find(n => n.id === id);
+                                          return s && s.exclusiveGroup === node.exclusiveGroup && s.id !== node.id;
+                                     });
+                                }
+
+                                const isLocked = (!isUnlocked && !isReachable) || nodeGroupLocked;
 
                                 const Icon = SkillIconMap[node.icon] || Star;
 
@@ -157,11 +176,13 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                                 ${isModifier && !isLocked ? 'rounded-md rotate-45' : ''} 
                                                 ${isUnlocked 
                                                     ? 'bg-indigo-600 border-indigo-400 text-white shadow-indigo-500/50' 
-                                                    : isReachable
-                                                        ? canAfford 
-                                                            ? 'bg-slate-800 border-yellow-500 text-yellow-500 hover:scale-105 cursor-pointer'
-                                                            : 'bg-slate-800 border-slate-500 text-slate-500 hover:border-slate-400 cursor-pointer'
-                                                        : 'bg-slate-900 border-slate-700 text-slate-700 cursor-not-allowed grayscale'
+                                                    : nodeGroupLocked
+                                                        ? 'bg-red-950 border-red-900 text-red-700 cursor-not-allowed grayscale'
+                                                        : isReachable
+                                                            ? canAfford 
+                                                                ? 'bg-slate-800 border-yellow-500 text-yellow-500 hover:scale-105 cursor-pointer'
+                                                                : 'bg-slate-800 border-slate-500 text-slate-500 hover:border-slate-400 cursor-pointer'
+                                                            : 'bg-slate-900 border-slate-700 text-slate-700 cursor-not-allowed grayscale'
                                                 }
                                             `}
                                         >
@@ -169,12 +190,19 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                                 <Icon size={20} />
                                             </div>
 
-                                            {isLocked && <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center"><Lock size={12} className="text-slate-400"/></div>}
+                                            {/* Overlays */}
+                                            {!isUnlocked && !isReachable && !nodeGroupLocked && (
+                                                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center"><Lock size={12} className="text-slate-400"/></div>
+                                            )}
+                                            
+                                            {nodeGroupLocked && (
+                                                <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center"><Ban size={16} className="text-red-500"/></div>
+                                            )}
                                             
                                             {isUnlocked && <div className="absolute -top-1 -right-1 bg-green-500 text-slate-900 rounded-full p-0.5 z-20"><Check size={8} strokeWidth={4} /></div>}
                                             
                                             {/* Cost Badge for non-unlocked */}
-                                            {!isUnlocked && isReachable && (
+                                            {!isUnlocked && isReachable && !nodeGroupLocked && (
                                                 <div className={`absolute -bottom-2 px-1.5 py-0.5 rounded text-[8px] font-bold border z-20 ${canAfford ? 'bg-slate-900 text-yellow-500 border-yellow-500' : 'bg-slate-900 text-red-500 border-red-500'}`}>
                                                     {node.cost}
                                                 </div>
@@ -191,14 +219,14 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                         {selectedNode ? (
                             <div className="flex flex-col h-full animate-in slide-in-from-right-4 fade-in duration-200">
                                 <div className="mb-6">
-                                    <div className="w-12 h-12 rounded bg-slate-900 border border-slate-700 flex items-center justify-center mb-4 text-slate-300">
+                                    <div className={`w-12 h-12 rounded border flex items-center justify-center mb-4 ${isGroupLocked ? 'bg-red-950 border-red-900 text-red-500' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>
                                         {React.createElement(SkillIconMap[selectedNode.icon] || Star, { size: 24 })}
                                     </div>
                                     <h3 className="text-xl font-bold text-white mb-1">{selectedNode.name}</h3>
                                     
                                     <div className="flex flex-wrap items-center gap-2 mb-4">
-                                        <span className={`text-xs px-2 py-0.5 rounded font-bold border ${isSelectedUnlocked ? 'bg-green-900/20 text-green-400 border-green-900/50' : canUnlockSelected ? 'bg-slate-800 text-yellow-400 border-yellow-500/50' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
-                                            {isSelectedUnlocked ? 'Learned' : canUnlockSelected ? 'Available' : 'Locked'}
+                                        <span className={`text-xs px-2 py-0.5 rounded font-bold border ${isSelectedUnlocked ? 'bg-green-900/20 text-green-400 border-green-900/50' : isGroupLocked ? 'bg-red-900/20 text-red-400 border-red-900/50' : canUnlockSelected ? 'bg-slate-800 text-yellow-400 border-yellow-500/50' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
+                                            {isSelectedUnlocked ? 'Learned' : isGroupLocked ? 'Locked (Exclusive)' : canUnlockSelected ? 'Available' : 'Locked'}
                                         </span>
                                         {selectedNode.effectType === 'MODIFIER' && (
                                             <span className="text-[10px] text-purple-400 flex items-center gap-1 border border-purple-500/30 px-1 rounded bg-purple-900/20">
@@ -214,7 +242,7 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                 
                                 <div className="mt-auto space-y-4">
                                     {/* Cost Display */}
-                                    {!isSelectedUnlocked && (
+                                    {!isSelectedUnlocked && !isGroupLocked && (
                                         <div className="flex justify-between items-center p-3 bg-slate-900 rounded border border-slate-800">
                                             <span className="text-sm text-slate-400">Cost</span>
                                             <span className={`font-bold ${liveAdventurer.skillPoints >= selectedNode.cost ? 'text-yellow-400' : 'text-red-400'}`}>
@@ -229,15 +257,21 @@ export const SkillTreeModal: React.FC<SkillTreeModalProps> = ({ adventurer: init
                                         className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all
                                             ${isSelectedUnlocked 
                                                 ? 'bg-slate-800 text-green-500 border border-slate-700 cursor-default opacity-50' 
-                                                : canUnlockSelected
-                                                    ? 'bg-yellow-600 hover:bg-yellow-500 text-slate-900 shadow-lg shadow-yellow-900/20 active:scale-95'
-                                                    : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                                                : isGroupLocked
+                                                    ? 'bg-red-900/10 text-red-500 border border-red-900/30 cursor-not-allowed'
+                                                    : canUnlockSelected
+                                                        ? 'bg-yellow-600 hover:bg-yellow-500 text-slate-900 shadow-lg shadow-yellow-900/20 active:scale-95'
+                                                        : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
                                             }
                                         `}
                                     >
                                         {isSelectedUnlocked ? (
                                             <>
                                                 <Check size={18} /> Learned
+                                            </>
+                                        ) : isGroupLocked ? (
+                                            <>
+                                                <Ban size={18} /> Mutually Exclusive
                                             </>
                                         ) : canUnlockSelected ? (
                                             <>

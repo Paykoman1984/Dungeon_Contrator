@@ -189,9 +189,9 @@ export const generateSkillTree = (role: AdventurerRole): { tree: SkillNode[], ar
     const tree: SkillNode[] = [
         // 1. Root
         { ...rootTmpl, id: 'root', x: 50, y: 90, requires: [], maxLevel: 1, cost: 1 },
-        // 2. Tier 2 (Split)
-        { ...l1Tmpl, id: 't2_l', x: 30, y: 70, requires: ['root'], maxLevel: 1, cost: 1 },
-        { ...r1Tmpl, id: 't2_r', x: 70, y: 70, requires: ['root'], maxLevel: 1, cost: 1 },
+        // 2. Tier 2 (Split) - MUTUALLY EXCLUSIVE
+        { ...l1Tmpl, id: 't2_l', x: 30, y: 70, requires: ['root'], maxLevel: 1, cost: 1, exclusiveGroup: 'tier2' },
+        { ...r1Tmpl, id: 't2_r', x: 70, y: 70, requires: ['root'], maxLevel: 1, cost: 1, exclusiveGroup: 'tier2' },
         // 3. Tier 3 (Extension)
         { ...l2Tmpl, id: 't3_l', x: 20, y: 45, requires: ['t2_l'], maxLevel: 1, cost: 2 },
         { ...r2Tmpl, id: 't3_r', x: 80, y: 45, requires: ['t2_r'], maxLevel: 1, cost: 2 },
@@ -367,7 +367,15 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
     // 3. Traits (New System)
     if (adventurer.traits) {
         adventurer.traits.forEach(trait => {
-            trait.effect(stats);
+            // Fix: Rehydrate function if missing (loaded from JSON)
+            if (typeof trait.effect === 'function') {
+                trait.effect(stats);
+            } else {
+                const template = TRAIT_POOL.find(t => t.name === trait.name);
+                if (template && typeof template.effect === 'function') {
+                    template.effect(stats);
+                }
+            }
         });
     }
 
