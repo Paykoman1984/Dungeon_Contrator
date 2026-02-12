@@ -3,8 +3,8 @@ import React from 'react';
 import { useGame } from '../services/GameContext';
 import { Adventurer, AdventurerRole } from '../types';
 import { RARITY_COLORS, ROLE_CONFIG } from '../constants';
-import { calculateConservativePower, formatNumber } from '../utils/gameMath';
-import { ShieldAlert, Crosshair, Sparkles, X, UserPlus, RefreshCw, Dna } from 'lucide-react';
+import { calculateConservativePower, formatNumber, calculateAdventurerSpecialization } from '../utils/gameMath';
+import { ShieldAlert, Crosshair, Sparkles, X, UserPlus, RefreshCw, Dna, Crown, Sword, Leaf, Anchor } from 'lucide-react';
 
 interface RecruitmentModalProps {
     onClose: () => void;
@@ -83,6 +83,12 @@ export const RecruitmentModal: React.FC<RecruitmentModalProps> = ({ onClose }) =
 const CandidateCard: React.FC<{ candidate: Adventurer; cost: number; onHire: () => void; canHire: boolean }> = ({ candidate, cost, onHire, canHire }) => {
     const power = calculateConservativePower(candidate, { ...useGame().state, activeRuns: [] }); // Dummy state for base power
     const roleConfig = ROLE_CONFIG[candidate.role];
+    const spec = calculateAdventurerSpecialization(candidate);
+    
+    const specIcon = spec.type === 'COMBAT' ? <Sword size={12} /> 
+                   : spec.type === 'GATHERING' ? <Leaf size={12} /> 
+                   : spec.type === 'FISHING' ? <Anchor size={12} /> 
+                   : <Crown size={12} />;
 
     return (
         <div className={`bg-slate-800 border-2 rounded-xl overflow-hidden flex flex-col shadow-xl transition-transform hover:-translate-y-1 ${RARITY_COLORS[candidate.rarity].replace('text-', 'border-')}`}>
@@ -100,7 +106,10 @@ const CandidateCard: React.FC<{ candidate: Adventurer; cost: number; onHire: () 
                     </div>
                     <div>
                         <h3 className={`text-lg font-bold ${RARITY_COLORS[candidate.rarity]}`}>{candidate.name}</h3>
-                        <div className="text-xs text-slate-400 font-medium">{candidate.specialization}</div>
+                        <div className={`flex items-center gap-1 text-xs font-bold ${spec.color}`}>
+                            {specIcon}
+                            {spec.label}
+                        </div>
                     </div>
                 </div>
                 

@@ -1,5 +1,5 @@
 
-import { Dungeon, Rarity, Upgrade, AdventurerRole, Skill, Enemy, WeaponType, PrestigeUpgrade, ContractType, Material, AdventurerTrait, SkillNode, SkillTemplate, Trait, RealmModifier } from './types';
+import { Dungeon, Rarity, Upgrade, AdventurerRole, Skill, Enemy, WeaponType, PrestigeUpgrade, ContractType, Material, AdventurerTrait, SkillNode, SkillTemplate, Trait, RealmModifier, ItemSet, UniqueEffect, ConsumableDef, CraftingRecipe, ItemType } from './types';
 
 export const INITIAL_GOLD = 0;
 export const INVENTORY_SIZE = 50;
@@ -10,14 +10,28 @@ export const TAVERN_CONFIG = {
     poolSize: 3
 };
 
+// --- EARLY GAME HOOK CONFIG ---
+export const EARLY_GAME_CONFIG = {
+    durationMinutes: 15,   // Boost lasts for the first 15 minutes of the game (real-time)
+    maxXpMult: 2.5,        // Start with 2.5x XP
+    maxGoldMult: 2.5,      // Start with 2.5x Gold
+    maxDropMult: 1.5,      // Start with 1.5x Drop Rate (Subtler to preserve economy)
+};
+
 // --- REALM & LEVELING CONFIG ---
 
 export const REALM_CONFIG = {
-    baseXp: 100,
-    scalingFactor: 1.8,
-    baseEnemyScaling: 0.15, // 15% per rank
-    baseLootQuantity: 0.02, // 2% chance for double loot per rank
-    baseRarityShift: 1.0, // +1 shift score per rank
+    // Rank (Soft Progression)
+    baseXp: 2500, 
+    scalingFactor: 2.2, 
+    
+    // Reward Scaling (Based on RANK)
+    rankLootQuantity: 0.05, // +5% chance for double loot per rank
+    rankRarityShift: 1.0, // +1 shift score per rank
+    rankLootYield: 0.05, // +5% gold/resource yield per rank
+
+    // Difficulty Scaling (Based on TIER - Ascension Only)
+    tierEnemyScaling: 0.25, // +25% Enemy Power per Tier
 };
 
 export const XP_CURVE_CONFIG = {
@@ -31,19 +45,43 @@ export const XP_CURVE_CONFIG = {
     }
 };
 
-export const MASTERY_BONUSES = {
+export const MASTERY_CONFIG = {
     combat: {
-        powerPerLevel: 0.05, // +5% Power per level
-        damagePerLevel: 0.02 // +2% Base Damage per level
+        durationRedPerLevel: 0.02, // -2% Duration per level (Logistics)
+        xpBonusPerLevel: 0.05, // +5% XP per level (Training)
+        milestones: {
+            5: "Veterancy: Minimum Damage floor raised by 10%",
+            10: "Blitz Tactics: -10% Additional Duration Reduction",
+            15: "War Hero: +20% Prestige Currency Gain"
+        }
     },
     gathering: {
-        yieldPerLevel: 0.05, // +5% Yield per level
-        efficiencyPerLevel: 0.02 // +2% Speed/Efficiency per level
+        durationRedPerLevel: 0.015, // -1.5% Duration
+        doubleYieldChancePerLevel: 0.03, // +3% Chance to double materials
+        milestones: {
+            5: "Strip Mining: Small chance for Triple Yield",
+            10: "Logistics: -10% Additional Duration Reduction",
+            15: "Deep Earth: Unlocks Rare Material Nodes (Passive)"
+        }
     },
     fishing: {
-        rareChancePerLevel: 0.01, // +1% Rare chance
-        speedPerLevel: 0.03 // +3% Speed
+        durationRedPerLevel: 0.01, // -1% Duration
+        doubleCatchChancePerLevel: 0.02, // +2% Streak chance
+        rareBonusPerLevel: 0.05, // +5% Rare fish chance
+        milestones: {
+            5: "High Tide: +25% Gold from Fish",
+            10: "Net Fishing: +5% Double Catch Chance",
+            15: "Abyssal Secrets: Legendary Fish Chance +1%"
+        }
     }
+};
+
+// Deprecated but kept for type safety in migration if needed, 
+// though we will use MASTERY_CONFIG in the new math functions.
+export const MASTERY_BONUSES = {
+    combat: { powerPerLevel: 0, damagePerLevel: 0 },
+    gathering: { yieldPerLevel: 0, efficiencyPerLevel: 0 },
+    fishing: { rareChancePerLevel: 0, speedPerLevel: 0 }
 };
 
 export const REALM_MODIFIERS: RealmModifier[] = [
@@ -51,28 +89,132 @@ export const REALM_MODIFIERS: RealmModifier[] = [
         id: 'elite_enemies',
         name: 'Elite Enemies',
         description: 'Enemies are 50% stronger, but drop 50% more gold.',
-        unlockRank: 5,
+        unlockRank: 2,
         enemyPowerMult: 1.5,
         lootYieldMult: 1.5,
-        rarityShiftBonus: 0
+        rarityShiftBonus: 0,
+        unlockCost: [ { resourceId: 'iron_ore', amount: 50 } ]
     },
     {
         id: 'treasure_hoard',
         name: 'Treasure Hoard',
         description: 'Enemies are 2x stronger. High chance for better loot.',
-        unlockRank: 10,
+        unlockRank: 5,
         enemyPowerMult: 2.0,
         lootYieldMult: 1.2,
-        rarityShiftBonus: 5.0
+        rarityShiftBonus: 5.0,
+        unlockCost: [ { resourceId: 'ancient_relic', amount: 5 }, { resourceId: 'prism_pearl', amount: 10 } ]
     },
     {
         id: 'corrupted_land',
         name: 'Corrupted Land',
         description: 'Extremely dangerous (3x Power). Massive rewards.',
-        unlockRank: 20,
+        unlockRank: 10,
         enemyPowerMult: 3.0,
         lootYieldMult: 3.0,
-        rarityShiftBonus: 10.0
+        rarityShiftBonus: 10.0,
+        unlockCost: [ { resourceId: 'ancient_relic', amount: 25 }, { resourceId: 'mystic_herb', amount: 100 } ]
+    }
+];
+
+// --- CONSUMABLES REGISTRY ---
+export const CONSUMABLES: ConsumableDef[] = [
+    {
+        id: 'minor_power_potion',
+        name: 'Minor Power Potion',
+        description: '+10% Party Damage for 5 minutes.',
+        duration: 300000,
+        effectType: 'POWER',
+        effectValue: 0.10,
+        cost: [{ resourceId: 'mystic_herb', amount: 5 }],
+        goldCost: 50
+    },
+    {
+        id: 'travel_ration',
+        name: 'Travel Ration',
+        description: '-10% Contract Duration for 10 minutes.',
+        duration: 600000,
+        effectType: 'SPEED',
+        effectValue: 0.10,
+        cost: [{ resourceId: 'raw_fish', amount: 10 }],
+        goldCost: 20
+    },
+    {
+        id: 'merchants_tonic',
+        name: 'Merchant\'s Tonic',
+        description: '+20% Gold Gain for 5 minutes.',
+        duration: 300000,
+        effectType: 'GOLD',
+        effectValue: 0.20,
+        cost: [{ resourceId: 'prism_pearl', amount: 1 }],
+        goldCost: 100
+    },
+    {
+        id: 'whetstone',
+        name: 'Whetstone',
+        description: '+15% Party Damage for 10 minutes.',
+        duration: 600000,
+        effectType: 'POWER',
+        effectValue: 0.15,
+        cost: [{ resourceId: 'iron_ore', amount: 10 }],
+        goldCost: 75
+    }
+];
+
+// --- CRAFTING RECIPES ---
+export const CRAFTING_RECIPES: CraftingRecipe[] = [
+    {
+        id: 'iron_sword',
+        name: 'Forged Iron Sword',
+        description: 'A reliable Uncommon sword.',
+        targetType: ItemType.WEAPON,
+        targetSubtype: WeaponType.SWORD,
+        targetRarity: Rarity.UNCOMMON,
+        targetLevel: 5,
+        cost: [{ resourceId: 'iron_ore', amount: 15 }, { resourceId: 'hardwood', amount: 5 }],
+        goldCost: 200
+    },
+    {
+        id: 'reinforced_armor',
+        name: 'Reinforced Plate',
+        description: 'Sturdy Uncommon armor.',
+        targetType: ItemType.ARMOR,
+        targetRarity: Rarity.UNCOMMON,
+        targetLevel: 5,
+        cost: [{ resourceId: 'iron_ore', amount: 20 }],
+        goldCost: 200
+    },
+    {
+        id: 'mystic_staff',
+        name: 'Elder Wood Staff',
+        description: 'A Rare staff infused with magic.',
+        targetType: ItemType.WEAPON,
+        targetSubtype: WeaponType.STAFF,
+        targetRarity: Rarity.RARE,
+        targetLevel: 15,
+        cost: [{ resourceId: 'hardwood', amount: 50 }, { resourceId: 'mystic_herb', amount: 10 }],
+        goldCost: 1000
+    },
+    {
+        id: 'lucky_charm_craft',
+        name: 'Pearl Amulet',
+        description: 'A Rare trinket that glistens.',
+        targetType: ItemType.TRINKET,
+        targetRarity: Rarity.RARE,
+        targetLevel: 15,
+        cost: [{ resourceId: 'prism_pearl', amount: 5 }, { resourceId: 'iron_ore', amount: 20 }],
+        goldCost: 1500
+    },
+    {
+        id: 'ancient_blade',
+        name: 'Relic Blade',
+        description: 'An Epic weapon from the old world.',
+        targetType: ItemType.WEAPON,
+        targetSubtype: WeaponType.SWORD,
+        targetRarity: Rarity.EPIC,
+        targetLevel: 30,
+        cost: [{ resourceId: 'ancient_relic', amount: 3 }, { resourceId: 'iron_ore', amount: 200 }],
+        goldCost: 5000
     }
 ];
 
@@ -128,6 +270,79 @@ export const MAX_STATS_BY_RARITY: Record<Rarity, number> = {
     [Rarity.EPIC]: 5,
     [Rarity.LEGENDARY]: 6,
 };
+
+// --- ITEM SETS & UNIQUES ---
+
+export const ITEM_SETS: ItemSet[] = [
+    {
+        id: 'warlord_fury',
+        name: "Warlord's Fury",
+        requiredPieces: 2,
+        description: "+20% Damage",
+        effect: (s) => s.damage *= 1.20
+    },
+    {
+        id: 'guardian_vow',
+        name: "Guardian's Vow",
+        requiredPieces: 2,
+        description: "+25% Health",
+        effect: (s) => s.health *= 1.25
+    },
+    {
+        id: 'merchant_guild',
+        name: "Merchant's Guild",
+        requiredPieces: 2,
+        description: "+30% Gold Gain",
+        effect: (s) => s.goldGain += 0.30
+    },
+    {
+        id: 'scholar_insight',
+        name: "Scholar's Insight",
+        requiredPieces: 2,
+        description: "+20% XP Gain",
+        effect: (s) => s.xpGain += 0.20
+    },
+    {
+        id: 'shadow_step',
+        name: "Shadow Step",
+        requiredPieces: 2,
+        description: "+15% Speed",
+        effect: (s) => s.speed *= 1.15
+    }
+];
+
+export const UNIQUE_EFFECT_REGISTRY: UniqueEffect[] = [
+    { 
+        id: 'vampiric_edge', 
+        name: "Vampiric Edge", 
+        description: "Heals 5% of max HP after every dungeon.",
+        effect: (s) => {} // Logic handled in dungeon loop ideally, or flat sustain stat
+    },
+    {
+        id: 'midas_curse',
+        name: "Midas Curse",
+        description: "+100% Gold, but -20% Health",
+        effect: (s) => { s.goldGain += 1.0; s.health *= 0.8; }
+    },
+    {
+        id: 'titan_blood',
+        name: "Titan Blood",
+        description: "Health increased by 50%.",
+        effect: (s) => s.health *= 1.5
+    },
+    {
+        id: 'berserker_soul',
+        name: "Berserker Soul",
+        description: "Damage increased by 40%.",
+        effect: (s) => s.damage *= 1.4
+    },
+    {
+        id: 'lucky_charm',
+        name: "Fortune's Favor",
+        description: "Loot Luck +50%.",
+        effect: (s) => s.lootLuck += 0.5
+    }
+];
 
 // --- TIER CONFIGURATION ---
 
@@ -265,71 +480,6 @@ export const ADVENTURER_TRAITS: AdventurerTrait[] = [
     { id: 'legacy_trait', name: 'Legacy Trait', description: 'Migrated', effect: (s) => {} },
 ];
 
-// --- SKILL POOLS (Expanded for Gathering/Fishing) ---
-
-const STAT_POOLS: Record<AdventurerRole, { root: SkillTemplate[], offense: SkillTemplate[], defense: SkillTemplate[], hybrid: SkillTemplate[] }> = {
-    [AdventurerRole.WARRIOR]: {
-        root: [
-            { name: "Warrior's Heart", description: "+10% Health", icon: "Heart", effectType: "STAT", effectValue: 0.10, statTarget: "health", poolType: 'COMBAT' },
-            { name: "Strength", description: "+5% Damage", icon: "Sword", effectType: "STAT", effectValue: 0.05, statTarget: "damage", poolType: 'COMBAT' },
-            { name: "Field Training", description: "+10% Loot Luck", icon: "Box", effectType: "ECONOMY", effectValue: 0.10, statTarget: "loot", poolType: 'GATHERING' }
-        ],
-        offense: [
-            { name: "Heavy Blows", description: "+10% Damage", icon: "Sword", effectType: "STAT", effectValue: 0.10, statTarget: "damage", poolType: 'COMBAT' },
-            { name: "Sundering", description: "+10% Crit Chance", icon: "Crosshair", effectType: "STAT", effectValue: 0.10, statTarget: "crit", poolType: 'COMBAT' }
-        ],
-        defense: [
-            { name: "Thick Hide", description: "+15% Health", icon: "Shield", effectType: "STAT", effectValue: 0.15, statTarget: "health", poolType: 'COMBAT' },
-            { name: "Conditioning", description: "+5% Speed", icon: "Zap", effectType: "STAT", effectValue: 0.05, statTarget: "speed", poolType: 'HYBRID' }
-        ],
-        hybrid: [
-            { name: "Battle Hardened", description: "+10% Dmg & Health", icon: "Crown", effectType: "STAT", effectValue: 0.10, statTarget: "all", poolType: 'COMBAT' },
-            { name: "Commander", description: "+20% Gold Gain", icon: "Coins", effectType: "ECONOMY", effectValue: 0.20, statTarget: "gold", poolType: 'HYBRID' },
-            { name: "Lumberjack", description: "+15% Gathering Yield", icon: "Tree", effectType: "ECONOMY", effectValue: 0.15, statTarget: "loot", poolType: 'GATHERING' }
-        ]
-    },
-    [AdventurerRole.ROGUE]: {
-        root: [
-            { name: "Agility", description: "+5% Speed", icon: "Zap", effectType: "STAT", effectValue: 0.05, statTarget: "speed", poolType: 'COMBAT' },
-            { name: "Keen Eye", description: "+5% Crit Chance", icon: "Eye", effectType: "STAT", effectValue: 0.05, statTarget: "crit", poolType: 'COMBAT' },
-            { name: "Scout", description: "+10% Gold Gain", icon: "Coins", effectType: "ECONOMY", effectValue: 0.10, statTarget: "gold", poolType: 'GATHERING' }
-        ],
-        offense: [
-            { name: "Backstab", description: "+15% Damage", icon: "Sword", effectType: "STAT", effectValue: 0.15, statTarget: "damage", poolType: 'COMBAT' },
-            { name: "Precision", description: "+15% Crit Chance", icon: "Crosshair", effectType: "STAT", effectValue: 0.15, statTarget: "crit", poolType: 'COMBAT' }
-        ],
-        defense: [
-            { name: "Evasion", description: "+10% Speed", icon: "Zap", effectType: "STAT", effectValue: 0.10, statTarget: "speed", poolType: 'COMBAT' },
-            { name: "Loot Sense", description: "+10% Loot Luck", icon: "Box", effectType: "ECONOMY", effectValue: 0.10, statTarget: "loot", poolType: 'GATHERING' }
-        ],
-        hybrid: [
-            { name: "Shadow Arts", description: "+10% Speed & Crit", icon: "Eye", effectType: "STAT", effectValue: 0.10, statTarget: "speed_crit", poolType: 'COMBAT' },
-            { name: "Merchant", description: "+25% Gold Gain", icon: "Coins", effectType: "ECONOMY", effectValue: 0.25, statTarget: "gold", poolType: 'HYBRID' },
-            { name: "Master Angler", description: "+20% Fishing Yield", icon: "Anchor", effectType: "ECONOMY", effectValue: 0.20, statTarget: "loot", poolType: 'FISHING' }
-        ]
-    },
-    [AdventurerRole.MAGE]: {
-        root: [
-            { name: "Intellect", description: "+10% Damage", icon: "Sparkles", effectType: "STAT", effectValue: 0.10, statTarget: "damage", poolType: 'COMBAT' },
-            { name: "Focus", description: "+5% XP Gain", icon: "Book", effectType: "ECONOMY", effectValue: 0.05, statTarget: "xp", poolType: 'HYBRID' },
-            { name: "Divination", description: "+10% Loot Luck", icon: "Eye", effectType: "ECONOMY", effectValue: 0.10, statTarget: "loot", poolType: 'GATHERING' }
-        ],
-        offense: [
-            { name: "Fireball", description: "+20% Damage", icon: "Flame", effectType: "STAT", effectValue: 0.20, statTarget: "damage", poolType: 'COMBAT' },
-            { name: "Arcane Flux", description: "+10% Speed", icon: "Zap", effectType: "STAT", effectValue: 0.10, statTarget: "speed", poolType: 'COMBAT' }
-        ],
-        defense: [
-            { name: "Mana Shield", description: "+15% Health", icon: "Shield", effectType: "STAT", effectValue: 0.15, statTarget: "health", poolType: 'COMBAT' },
-            { name: "Wisdom", description: "+15% XP Gain", icon: "Book", effectType: "ECONOMY", effectValue: 0.15, statTarget: "xp", poolType: 'HYBRID' }
-        ],
-        hybrid: [
-            { name: "Power Infusion", description: "+15% Dmg & Health", icon: "Crown", effectType: "STAT", effectValue: 0.15, statTarget: "all", poolType: 'COMBAT' },
-            { name: "Transmute", description: "+30% Gold Gain", icon: "Beaker", effectType: "ECONOMY", effectValue: 0.30, statTarget: "gold", poolType: 'HYBRID' },
-            { name: "Nature's Call", description: "+20% Gathering Yield", icon: "Leaf", effectType: "ECONOMY", effectValue: 0.20, statTarget: "loot", poolType: 'GATHERING' }
-        ]
-    }
-}
-
 export const CAPSTONE_POOL: Record<AdventurerRole, SkillTemplate[]> = {
     [AdventurerRole.WARRIOR]: [
         { name: "Weapon Master", description: "Weapon Stats 2x, No Trinket", icon: "Sword", effectType: "MODIFIER", modifier: "WEAPON_MASTER", effectValue: 0 },
@@ -349,8 +499,6 @@ export const CAPSTONE_POOL: Record<AdventurerRole, SkillTemplate[]> = {
 };
 
 export const getRandomFromPool = (pool: SkillTemplate[]) => pool[Math.floor(Math.random() * pool.length)];
-
-// ... Keep existing ENEMIES, MATERIALS, DUNGEONS ...
 
 export const CLASS_SKILLS: Record<AdventurerRole, Skill[]> = {
     [AdventurerRole.WARRIOR]: [
@@ -406,6 +554,7 @@ export const DUNGEONS: Dungeon[] = [
     enemyId: 'giant_rat',
     dropChance: 0.20,
     recommendedPower: 25,
+    mechanicId: 'SWARM', // Unique Mechanic
     unlockReq: {} // Always unlocked
   },
   {
@@ -419,6 +568,7 @@ export const DUNGEONS: Dungeon[] = [
     enemyId: 'scavenger_goblin',
     dropChance: 0.25,
     recommendedPower: 100,
+    mechanicId: 'PACK_TACTICS', // Unique Mechanic
     unlockReq: {
         minPower: 80,
         previousDungeonId: 'rat_cellar',
@@ -436,6 +586,7 @@ export const DUNGEONS: Dungeon[] = [
     enemyId: 'dire_wolf',
     dropChance: 0.30,
     recommendedPower: 300,
+    mechanicId: 'PACK_TACTICS', // Reuse mechanic but stronger due to scaling
     unlockReq: {
         minPower: 250,
         previousDungeonId: 'goblin_camp',
@@ -453,6 +604,7 @@ export const DUNGEONS: Dungeon[] = [
     enemyId: 'skeleton_warrior',
     dropChance: 0.35,
     recommendedPower: 900,
+    mechanicId: 'UNDEAD_RESILIENCE', // Unique Mechanic
     unlockReq: {
         minPower: 800,
         minGuildLevel: 3
@@ -469,6 +621,7 @@ export const DUNGEONS: Dungeon[] = [
     enemyId: 'young_dragon',
     dropChance: 0.40,
     recommendedPower: 2500,
+    mechanicId: 'ELITE_HUNT', // Unique Mechanic
     unlockReq: {
         minPower: 2000,
         minAscension: 1
@@ -504,6 +657,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.80, // Base chance to get ANY material per cycle
     recommendedPower: 30,
     lootTable: ['hardwood', 'mystic_herb'],
+    mechanicId: 'RESOURCE_SURGE', // Unique Mechanic
     unlockReq: {}
   },
   {
@@ -562,7 +716,8 @@ export const UPGRADES: Upgrade[] = [
     costMultiplier: 1.5,
     level: 0,
     maxLevel: 50,
-    effect: (lvl) => lvl * 2, 
+    effect: (lvl) => lvl * 2,
+    // No resource cost for early levels
   },
   {
     id: 'marketplace_connections',
@@ -574,6 +729,7 @@ export const UPGRADES: Upgrade[] = [
     level: 0,
     maxLevel: 20,
     effect: (lvl) => lvl * 0.1, 
+    resourceCost: (lvl) => lvl >= 5 ? [{ resourceId: 'raw_fish', amount: lvl }] : []
   },
   {
     id: 'logistics_network',
@@ -585,6 +741,7 @@ export const UPGRADES: Upgrade[] = [
     level: 0,
     maxLevel: 10,
     effect: (lvl) => lvl * 0.05, 
+    resourceCost: (lvl) => lvl >= 1 ? [{ resourceId: 'hardwood', amount: lvl * 10 }] : []
   },
   {
     id: 'loot_logic',
@@ -595,7 +752,8 @@ export const UPGRADES: Upgrade[] = [
     costMultiplier: 1.5,
     level: 0,
     maxLevel: 20,
-    effect: (lvl) => lvl * 0.02, 
+    effect: (lvl) => lvl * 0.02,
+    resourceCost: (lvl) => lvl >= 3 ? [{ resourceId: 'mystic_herb', amount: lvl * 2 }] : []
   },
 ];
 
@@ -642,4 +800,59 @@ export const PRESTIGE_UPGRADES: PrestigeUpgrade[] = [
     }
 ];
 
-export { STAT_POOLS };
+export const STAT_POOLS: Record<AdventurerRole, { root: SkillTemplate[], offense: SkillTemplate[], defense: SkillTemplate[], hybrid: SkillTemplate[] }> = {
+    [AdventurerRole.WARRIOR]: {
+        root: [
+            { name: "Veteran", description: "+10% Damage", icon: "Sword", effectType: "STAT", effectValue: 0.1, statTarget: "damage" },
+            { name: "Toughness", description: "+15% Health", icon: "Heart", effectType: "STAT", effectValue: 0.15, statTarget: "health" }
+        ],
+        offense: [
+            { name: "Brutal Swing", description: "+8% Damage", icon: "Sword", effectType: "STAT", effectValue: 0.08, statTarget: "damage" },
+            { name: "Precision", description: "+5% Crit", icon: "Crosshair", effectType: "STAT", effectValue: 0.05, statTarget: "crit" }
+        ],
+        defense: [
+            { name: "Iron Skin", description: "+12% Health", icon: "Shield", effectType: "STAT", effectValue: 0.12, statTarget: "health" },
+            { name: "Thick Hide", description: "+10% Health", icon: "Shield", effectType: "STAT", effectValue: 0.10, statTarget: "health" }
+        ],
+        hybrid: [
+            { name: "Battle Hardened", description: "+5% Dmg & HP", icon: "Star", effectType: "STAT", effectValue: 0.05, statTarget: "all" },
+            { name: "Looter", description: "+10% Gold", icon: "Coins", effectType: "ECONOMY", effectValue: 0.10, statTarget: "gold" }
+        ]
+    },
+    [AdventurerRole.ROGUE]: {
+        root: [
+            { name: "Swiftness", description: "+10% Speed", icon: "Zap", effectType: "STAT", effectValue: 0.10, statTarget: "speed" },
+            { name: "Lethality", description: "+8% Damage", icon: "Sword", effectType: "STAT", effectValue: 0.08, statTarget: "damage" }
+        ],
+        offense: [
+            { name: "Backstab", description: "+10% Crit", icon: "Crosshair", effectType: "STAT", effectValue: 0.10, statTarget: "crit" },
+            { name: "Cheap Shot", description: "+8% Damage", icon: "Sword", effectType: "STAT", effectValue: 0.08, statTarget: "damage" }
+        ],
+        defense: [
+            { name: "Evasion", description: "+8% Health", icon: "Shield", effectType: "STAT", effectValue: 0.08, statTarget: "health" },
+            { name: "Dodge", description: "+5% Speed", icon: "Zap", effectType: "STAT", effectValue: 0.05, statTarget: "speed" }
+        ],
+        hybrid: [
+            { name: "Opportunist", description: "+10% Gold", icon: "Coins", effectType: "ECONOMY", effectValue: 0.10, statTarget: "gold" },
+            { name: "Scout", description: "+10% Loot Luck", icon: "Box", effectType: "ECONOMY", effectValue: 0.10, statTarget: "loot" }
+        ]
+    },
+    [AdventurerRole.MAGE]: {
+        root: [
+            { name: "Intellect", description: "+12% Damage", icon: "Flame", effectType: "STAT", effectValue: 0.12, statTarget: "damage" },
+            { name: "Focus", description: "+5% Crit", icon: "Eye", effectType: "STAT", effectValue: 0.05, statTarget: "crit" }
+        ],
+        offense: [
+            { name: "Fireball", description: "+10% Damage", icon: "Flame", effectType: "STAT", effectValue: 0.10, statTarget: "damage" },
+            { name: "Arcane Power", description: "+8% Crit", icon: "Sparkles", effectType: "STAT", effectValue: 0.08, statTarget: "crit" }
+        ],
+        defense: [
+            { name: "Mana Shield", description: "+10% Health", icon: "Shield", effectType: "STAT", effectValue: 0.10, statTarget: "health" },
+            { name: "Ward", description: "+8% Health", icon: "Shield", effectType: "STAT", effectValue: 0.08, statTarget: "health" }
+        ],
+        hybrid: [
+            { name: "Alchemy", description: "+10% XP Gain", icon: "Beaker", effectType: "ECONOMY", effectValue: 0.10, statTarget: "xp" },
+            { name: "Transmute", description: "+15% Gold", icon: "Coins", effectType: "ECONOMY", effectValue: 0.15, statTarget: "gold" }
+        ]
+    }
+};

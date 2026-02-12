@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { DUNGEONS, ENEMIES, MATERIALS, REALM_MODIFIERS } from '../constants';
-import { calculateAdventurerPower, calculateConservativePower, calculateDungeonDuration, calculatePartyDps, formatNumber, getRealmBonuses, calculateEffectiveDungeonStats } from '../utils/gameMath';
-import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Lock, AlertOctagon, CheckSquare, Square as UncheckedSquare } from 'lucide-react';
+import { calculateAdventurerPower, calculateConservativePower, calculateDungeonDuration, calculatePartyDps, formatNumber, getRealmBonuses, calculateEffectiveDungeonStats, getEarlyGameBoost } from '../utils/gameMath';
+import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Lock, AlertOctagon, CheckSquare, Square as UncheckedSquare, Rocket } from 'lucide-react';
 import { ContractType, AdventurerRole } from '../types';
 import { DungeonProgressBar } from './DungeonProgressBar';
 
@@ -13,6 +13,9 @@ export const DungeonList: React.FC = () => {
   const [selectedAdvIds, setSelectedAdvIds] = useState<string[]>([]);
   const [isAutoRepeat, setIsAutoRepeat] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<ContractType>(ContractType.DUNGEON);
+
+  // Early Game Boost Logic
+  const boost = getEarlyGameBoost(state);
 
   const addToParty = (id: string) => {
       if (selectedAdvIds.length >= 3) return; // Limit party size to 3
@@ -72,26 +75,41 @@ export const DungeonList: React.FC = () => {
   return (
     <div className="space-y-6">
       
-      {/* Tabs */}
-      <div className="flex space-x-2 border-b border-slate-800 pb-1">
-          <button
-            onClick={() => { setActiveTab(ContractType.DUNGEON); cancelConfiguration(); }}
-            className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.DUNGEON ? 'bg-slate-800 text-slate-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-              <Swords size={16} /> Combat
-          </button>
-          <button
-            onClick={() => { setActiveTab(ContractType.GATHERING); cancelConfiguration(); }}
-            className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.GATHERING ? 'bg-slate-800 text-emerald-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-emerald-400'}`}
-          >
-              <Leaf size={16} /> Gathering
-          </button>
-          <button
-            onClick={() => { setActiveTab(ContractType.FISHING); cancelConfiguration(); }}
-            className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.FISHING ? 'bg-slate-800 text-blue-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-blue-400'}`}
-          >
-              <Anchor size={16} /> Fishing
-          </button>
+      {/* Tabs & Indicators */}
+      <div className="flex justify-between items-center border-b border-slate-800 pb-1">
+          <div className="flex space-x-2">
+              <button
+                onClick={() => { setActiveTab(ContractType.DUNGEON); cancelConfiguration(); }}
+                className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.DUNGEON ? 'bg-slate-800 text-slate-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                  <Swords size={16} /> Combat
+              </button>
+              <button
+                onClick={() => { setActiveTab(ContractType.GATHERING); cancelConfiguration(); }}
+                className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.GATHERING ? 'bg-slate-800 text-emerald-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-emerald-400'}`}
+              >
+                  <Leaf size={16} /> Gathering
+              </button>
+              <button
+                onClick={() => { setActiveTab(ContractType.FISHING); cancelConfiguration(); }}
+                className={`px-4 py-2 text-sm font-bold flex items-center gap-2 rounded-t-lg transition-colors ${activeTab === ContractType.FISHING ? 'bg-slate-800 text-blue-100 border-t border-x border-slate-700' : 'text-slate-500 hover:text-blue-400'}`}
+              >
+                  <Anchor size={16} /> Fishing
+              </button>
+          </div>
+
+          {/* Early Game Boost Indicator */}
+          {boost.active && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-orange-900/40 to-red-900/40 rounded-full border border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.2)] animate-pulse">
+                  <Rocket size={14} className="text-orange-400" />
+                  <div className="flex flex-col leading-none">
+                      <span className="text-[10px] font-bold text-orange-200 uppercase tracking-wide">Rookie Rush Active</span>
+                      <span className="text-[9px] text-orange-300/80">
+                          XP x{boost.xpMult.toFixed(1)} • Gold x{boost.goldMult.toFixed(1)}
+                      </span>
+                  </div>
+              </div>
+          )}
       </div>
 
       <div className="grid gap-4">
@@ -138,8 +156,14 @@ export const DungeonList: React.FC = () => {
           avgGold *= realmStats.lootMultiplier;
           avgXp *= realmStats.lootMultiplier;
 
+          // APPLY BOOST TO ESTIMATE
+          if (boost.active) {
+              avgGold *= boost.goldMult;
+              avgXp *= boost.xpMult;
+          }
+
           if (isCombat && isOverpowered) {
-              avgGold = enemy.goldMin * realmStats.lootMultiplier;
+              avgGold = enemy.goldMin * realmStats.lootMultiplier * (boost.active ? boost.goldMult : 1);
               avgXp = (avgXp * 0.10); // Penalty is harsh on base
           }
 

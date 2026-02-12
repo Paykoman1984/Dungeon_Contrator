@@ -1,11 +1,11 @@
 
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
-import { calculateAdventurerPower, formatNumber, getAdventurerStats, areItemsEqual, calculateConservativePower, getEffectiveAdventurer, getActiveModifiers } from '../utils/gameMath';
+import { calculateAdventurerPower, formatNumber, getAdventurerStats, areItemsEqual, calculateConservativePower, getEffectiveAdventurer, getActiveModifiers, calculateAdventurerSpecialization } from '../utils/gameMath';
 import { ItemType, AdventurerRole, Item, Adventurer } from '../types';
-import { Sword, Shield, Gem, UserPlus, Heart, Zap, Crosshair, Sparkles, ShieldAlert, RefreshCw, Dna, GitMerge, Lock, PenLine, Check, X } from 'lucide-react';
-import { RARITY_COLORS, ROLE_CONFIG, CLASS_SKILLS, ADVENTURER_TRAITS } from '../constants';
-import { Tooltip, SkillTooltipContent } from './Tooltip';
+import { Sword, Shield, Gem, UserPlus, Heart, Zap, Crosshair, Sparkles, ShieldAlert, RefreshCw, Dna, GitMerge, Lock, PenLine, Check, X, Crown, Anchor, Leaf } from 'lucide-react';
+import { RARITY_COLORS, ROLE_CONFIG, ADVENTURER_TRAITS } from '../constants';
+import { Tooltip } from './Tooltip';
 import { ItemIcon } from './ItemIcon';
 import { ItemDetailsModal } from './ItemDetailsModal';
 import { SkillTreeModal } from './SkillTreeModal';
@@ -89,6 +89,13 @@ export const AdventurerList: React.FC = () => {
           const roleConfig = ROLE_CONFIG[adv.role];
           const legacyTrait = ADVENTURER_TRAITS.find(t => t.id === adv.traitId);
           
+          // --- Specialization Calculation ---
+          const spec = calculateAdventurerSpecialization(activeAdv);
+          const specIcon = spec.type === 'COMBAT' ? <Sword size={12} /> 
+                         : spec.type === 'GATHERING' ? <Leaf size={12} /> 
+                         : spec.type === 'FISHING' ? <Anchor size={12} /> 
+                         : <Crown size={12} />;
+
           const rarityBorder = {
               'Common': 'border-slate-700',
               'Uncommon': 'border-green-900',
@@ -103,7 +110,7 @@ export const AdventurerList: React.FC = () => {
               {/* Compact Header */}
               <div className="p-3 bg-slate-900/40 border-b border-slate-700/50 flex justify-between items-center group/card">
                   <div className="flex items-center gap-2.5 flex-grow min-w-0">
-                       {/* Compact Icon */}
+                       {/* Role Icon */}
                        <div className={`w-10 h-10 flex-shrink-0 rounded bg-slate-900 border border-slate-700 flex items-center justify-center ${roleConfig.color}`}>
                            {adv.role === AdventurerRole.WARRIOR && <ShieldAlert size={20} />}
                            {adv.role === AdventurerRole.ROGUE && <Crosshair size={20} />}
@@ -133,10 +140,27 @@ export const AdventurerList: React.FC = () => {
                                </div>
                            )}
                            
-                           <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1.5 font-medium uppercase tracking-wide">
-                               <span>{adv.title || "Contractor"}</span>
-                               <span className="w-1 h-1 rounded-full bg-slate-600"></span>
-                               <span>Lvl {adv.level}</span>
+                           <div className="flex items-center gap-2 mt-1">
+                               <span className="text-[10px] text-slate-400 font-medium">Lvl {adv.level}</span>
+                               {/* Specialization Badge */}
+                               <Tooltip content={
+                                   <div className="space-y-1">
+                                       <div className={`font-bold ${spec.color}`}>{spec.label}</div>
+                                       <div className="text-[10px] text-slate-400 grid grid-cols-2 gap-x-3">
+                                           <span>Combat Score:</span> <span className="text-white">{spec.scores.combat}</span>
+                                           <span>Gathering Score:</span> <span className="text-white">{spec.scores.gathering}</span>
+                                           <span>Fishing Score:</span> <span className="text-white">{spec.scores.fishing}</span>
+                                       </div>
+                                       <div className="text-[10px] text-green-400 pt-1 border-t border-slate-800">
+                                           Bonus: +{(spec.efficiencyBonus * 100).toFixed(0)}% Efficiency
+                                       </div>
+                                   </div>
+                               }>
+                                   <div className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded border border-current bg-slate-950/50 cursor-help ${spec.color}`}>
+                                       {specIcon}
+                                       <span>{spec.label}</span>
+                                   </div>
+                               </Tooltip>
                            </div>
                        </div>
                   </div>

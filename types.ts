@@ -42,6 +42,22 @@ export interface Skill {
   unlockLevel: number;
 }
 
+// --- SPECIALIZATION SYSTEM ---
+
+export type SpecializationType = 'COMBAT' | 'GATHERING' | 'FISHING' | 'HYBRID';
+
+export interface SpecializationData {
+    type: SpecializationType;
+    label: string; // e.g., "Combat Specialist"
+    scores: {
+        combat: number;
+        gathering: number;
+        fishing: number;
+    };
+    efficiencyBonus: number; // 0.05 to 0.10
+    color: string; // Hex or Tailwind class ref
+}
+
 // --- NEW TRAIT SYSTEM ---
 
 export type TraitType = 'COMBAT' | 'GATHERING' | 'FISHING' | 'HYBRID';
@@ -105,6 +121,45 @@ export interface SkillNode {
     modifier?: SkillModifier; 
 }
 
+// --- RESOURCE UTILIZATION SYSTEM ---
+
+export interface ResourceCost {
+    resourceId: string;
+    amount: number;
+}
+
+export type ConsumableType = 'POWER' | 'SPEED' | 'GOLD' | 'XP';
+
+export interface ConsumableDef {
+    id: string;
+    name: string;
+    description: string;
+    duration: number; // in ms
+    effectType: ConsumableType;
+    effectValue: number;
+    cost: ResourceCost[];
+    goldCost: number;
+}
+
+export interface ActiveConsumable {
+    id: string;
+    defId: string;
+    startTime: number;
+    endTime: number;
+}
+
+export interface CraftingRecipe {
+    id: string;
+    name: string;
+    targetType: ItemType;
+    targetSubtype?: WeaponType;
+    targetRarity: Rarity;
+    targetLevel: number; // Base level for crafted item
+    cost: ResourceCost[];
+    goldCost: number;
+    description: string;
+}
+
 // --- REALM EVOLUTION SYSTEM ---
 
 export interface RealmModifier {
@@ -115,16 +170,34 @@ export interface RealmModifier {
     enemyPowerMult: number; // Multiplies base requirement
     lootYieldMult: number; // Multiplies gold/xp
     rarityShiftBonus: number; // Adds to rarity weights
+    unlockCost?: ResourceCost[]; // Cost to unlock permanently
 }
 
 export interface RealmState {
-    realmRank: number;
+    realmTier: number; // HARD PROGRESSION (Ascension Only)
+    realmRank: number; // SOFT PROGRESSION (XP Based)
     realmExperience: number;
     // Map of DungeonID -> Array of Active Modifier IDs
     activeModifiers: Record<string, string[]>;
+    // Permanently unlocked modifiers (by ID)
+    unlockedModifiers: string[]; 
 }
 
-// --- GUILD MASTERY SYSTEM (PERMANENT) ---
+// --- DUNGEON MECHANICS ---
+
+export type DungeonMechanicId = 'NONE' | 'SWARM' | 'PACK_TACTICS' | 'UNDEAD_RESILIENCE' | 'RESOURCE_SURGE' | 'ELITE_HUNT';
+
+export interface MechanicModifier {
+    enemyHpMult: number;      // Multiplies Enemy HP (Higher = Slower kills)
+    powerReqMult: number;     // Multiplies Recommended Power
+    xpYieldMult: number;      // Multiplies XP per kill
+    goldYieldMult: number;    // Multiplies Gold per kill
+    lootRollBonus: number;    // Adds flat loot rolls
+    durationMult: number;     // Modifies run duration
+    description: string;      // generated description of current effect
+}
+
+// --- GUILD MASTERY SYSTEM ---
 
 export interface MasteryTrack {
     level: number;
@@ -137,7 +210,44 @@ export interface GuildMastery {
     fishing: MasteryTrack;
 }
 
-// -------------------------------
+export interface MasteryEffects {
+    combat: {
+        durationReduction: number; 
+        damageConsistency: number; 
+        xpBonus: number; 
+        milestones: string[];
+    };
+    gathering: {
+        durationReduction: number;
+        doubleYieldChance: number; 
+        rareMaterialBonus: number; 
+        milestones: string[];
+    };
+    fishing: {
+        durationReduction: number;
+        doubleCatchChance: number; 
+        rareFishBonus: number;
+        milestones: string[];
+    };
+}
+
+// --- ITEM IDENTITY & SETS ---
+
+export interface ItemSet {
+    id: string;
+    name: string;
+    requiredPieces: number;
+    description: string;
+    effect: (stats: any) => void;
+}
+
+export interface UniqueEffect {
+    id: string;
+    name: string;
+    description: string;
+    effect?: (stats: any) => void; // Stat modifier if applicable
+    trigger?: string; // e.g., "ON_KILL", "ON_HIT" (For engine use)
+}
 
 export interface ItemStat {
   name: string;
@@ -155,7 +265,16 @@ export interface Item {
   rarity: Rarity;
   level: number;
   stats: ItemStat[];
-  value: number; 
+  value: number;
+  
+  // New Identity Layer
+  potential: number; // 0-100+ Score
+  visualTier: 'S' | 'A' | 'B' | 'C' | 'D'; // Calculated from potential
+  identityTag?: string; // "Ancient", "Pristine", etc.
+  
+  // Set & Unique
+  setId?: string;
+  uniqueEffectId?: string;
 }
 
 export interface Material {
@@ -241,7 +360,8 @@ export interface Dungeon {
   dropChance: number; 
   recommendedPower: number; 
   lootTable?: string[]; 
-  unlockReq?: UnlockRequirements; 
+  unlockReq?: UnlockRequirements;
+  mechanicId?: DungeonMechanicId; // NEW: Unique Identity
 }
 
 export interface RunSnapshot {
@@ -277,6 +397,8 @@ export interface Upgrade {
   maxLevel: number;
   effect: (level: number) => number;
   type: 'ECONOMY' | 'COMBAT' | 'SPEED' | 'LOOT';
+  // Optional Resource Cost per level
+  resourceCost?: (level: number) => ResourceCost[];
 }
 
 export interface PrestigeUpgrade {
@@ -302,7 +424,8 @@ export interface DungeonReport {
   autoSalvagedCount: number; 
   autoSalvagedGold: number; 
   timestamp: number;
-  realmXpEarned?: number; // New field
+  realmXpEarned?: number; 
+  bonusesTriggered?: string[]; 
 }
 
 export interface LootFilterSettings {
@@ -313,15 +436,44 @@ export interface LootFilterSettings {
     matchAnyStat: string[]; 
 }
 
+// --- REWARD FEEDBACK SYSTEM ---
+
+export enum RewardSeverity {
+    MINOR = 'MINOR',
+    MAJOR = 'MAJOR',
+    EPIC = 'EPIC'
+}
+
+export enum RewardEventType {
+    ITEM_DROP = 'ITEM_DROP',
+    ADVENTURER_LEVEL_UP = 'ADVENTURER_LEVEL_UP',
+    MASTERY_LEVEL_UP = 'MASTERY_LEVEL_UP',
+    REALM_LEVEL_UP = 'REALM_LEVEL_UP',
+    ASCENSION = 'ASCENSION',
+    DUNGEON_UNLOCK = 'DUNGEON_UNLOCK'
+}
+
+export interface RewardEvent {
+    id: string;
+    type: RewardEventType;
+    severity: RewardSeverity;
+    message: string;
+    entityId?: string; // ID of item, adventurer, etc.
+    metadata?: Record<string, any>;
+    timestamp: number;
+}
+
 export interface GameState {
   // --- RUN STATE ---
+  startTime: number; 
   gold: number;
   adventurers: Adventurer[];
-  recruitmentPool: Adventurer[]; // TAVERN POOL
+  recruitmentPool: Adventurer[]; 
   refreshCost: number;
   inventory: Item[];
   activeRuns: ActiveRun[];
   materials: Record<string, number>;
+  activeConsumables: ActiveConsumable[]; // New
   
   // --- META STATE ---
   prestigeCurrency: number;
@@ -329,7 +481,7 @@ export interface GameState {
   unlockedDungeons: string[]; 
   upgrades: { [id: string]: number }; 
   prestigeUpgrades: { [id: string]: number }; 
-  guildMastery: GuildMastery; // Permanent Mastery Tracks
+  guildMastery: GuildMastery; 
   
   // --- WORLD EVOLUTION (PERMANENT) ---
   realm: RealmState;
@@ -346,4 +498,7 @@ export interface GameState {
     dungeonClears: Record<string, number>; 
   };
   legendaryPityCounter: number; 
+  
+  // --- EVENT SYSTEM ---
+  rewardEventQueue: RewardEvent[];
 }

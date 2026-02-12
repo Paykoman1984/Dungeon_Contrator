@@ -1,6 +1,6 @@
 
-import { Adventurer, Item, ItemType, Rarity, ItemStat, GameState, AdventurerRole, WeaponType, RunSnapshot, SkillNode, Dungeon, Trait, TraitType, RealmState, DungeonReport, ContractType } from '../types';
-import { UPGRADES, CLASS_SKILLS, ROLE_CONFIG, ADVENTURER_RARITY_MULTIPLIERS, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, TIER_WEIGHTS, TIER_MULTIPLIERS, CRAFTING_RARITY_MULTIPLIERS, ENCHANT_COST_BASE, REROLL_COST_BASE, STAT_POOLS, CAPSTONE_POOL, getRandomFromPool, ADVENTURER_NAMES, TITLES_BY_ROLE, BASE_DROP_CHANCE, MAX_DROP_CHANCE, BASE_RARITY_WEIGHTS, RARITY_CONFIG, TRAIT_POOL, REALM_CONFIG, REALM_MODIFIERS, XP_CURVE_CONFIG, MASTERY_BONUSES } from '../constants';
+import { Adventurer, Item, ItemType, Rarity, ItemStat, GameState, AdventurerRole, WeaponType, RunSnapshot, SkillNode, Dungeon, Trait, TraitType, RealmState, DungeonReport, ContractType, MechanicModifier, DungeonMechanicId, SpecializationData, SpecializationType, MasteryEffects, ResourceCost, ConsumableType, ActiveConsumable } from '../types';
+import { UPGRADES, CLASS_SKILLS, ROLE_CONFIG, ADVENTURER_RARITY_MULTIPLIERS, CLASS_WEAPONS, PRESTIGE_UPGRADES, MAX_STATS_BY_RARITY, TIER_WEIGHTS, TIER_MULTIPLIERS, CRAFTING_RARITY_MULTIPLIERS, ENCHANT_COST_BASE, REROLL_COST_BASE, STAT_POOLS, CAPSTONE_POOL, getRandomFromPool, ADVENTURER_NAMES, TITLES_BY_ROLE, BASE_DROP_CHANCE, MAX_DROP_CHANCE, BASE_RARITY_WEIGHTS, RARITY_CONFIG, TRAIT_POOL, REALM_CONFIG, REALM_MODIFIERS, XP_CURVE_CONFIG, MASTERY_CONFIG, ITEM_SETS, UNIQUE_EFFECT_REGISTRY, EARLY_GAME_CONFIG, CONSUMABLES } from '../constants';
 
 export const formatNumber = (num: number): string => {
   if (num >= 1_000_000) return (num / 1_000_000).toFixed(2) + 'M';
@@ -15,11 +15,105 @@ export const areItemsEqual = (itemA: Item | null, itemB: Item | null): boolean =
     return itemA.id === itemB.id && JSON.stringify(itemA.stats) === JSON.stringify(itemB.stats);
 };
 
+// ... (Existing helper functions remain unchanged) ...
 // Helper to calculate total skill points available based on level
 export const calculateTotalSkillPoints = (level: number): number => {
     if (level < 5) return 0;
     // Unlock at 5 (1 point), then 1 point every 3 levels (8, 11, 14, 17, 20...)
     return 1 + Math.floor((level - 5) / 3);
+};
+
+// --- RESOURCE HELPERS ---
+
+export const checkResourceCost = (state: GameState, costs: ResourceCost[] | undefined): boolean => {
+    if (!costs || costs.length === 0) return true;
+    return costs.every(cost => (state.materials[cost.resourceId] || 0) >= cost.amount);
+};
+
+export const deductResources = (materials: Record<string, number>, costs: ResourceCost[]): Record<string, number> => {
+    const newMaterials = { ...materials };
+    costs.forEach(cost => {
+        const current = newMaterials[cost.resourceId] || 0;
+        newMaterials[cost.resourceId] = Math.max(0, current - cost.amount);
+    });
+    return newMaterials;
+};
+
+// --- CONSUMABLE HELPERS ---
+
+export const calculateConsumableBonuses = (activeConsumables: ActiveConsumable[]) => {
+    const bonuses = {
+        POWER: 1.0, // Multiplier
+        SPEED: 1.0, // Multiplier (Lower is better, so initial is 1.0, buff reduces it)
+        GOLD: 1.0, // Multiplier
+        XP: 1.0 // Multiplier
+    };
+
+    activeConsumables.forEach(ac => {
+        const def = CONSUMABLES.find(c => c.id === ac.defId);
+        if (def) {
+            if (def.effectType === 'POWER') bonuses.POWER += def.effectValue;
+            if (def.effectType === 'GOLD') bonuses.GOLD += def.effectValue;
+            if (def.effectType === 'XP') bonuses.XP += def.effectValue;
+            if (def.effectType === 'SPEED') bonuses.SPEED -= def.effectValue; // e.g., 1.0 - 0.10 = 0.90 duration
+        }
+    });
+
+    return bonuses;
+};
+
+// --- EARLY GAME BOOST LOGIC ---
+
+export const getEarlyGameBoost = (state: GameState) => {
+    const isAscended = state.ascensionCount > 0;
+    
+    // Hard check: No boost after first ascension
+    if (isAscended) {
+        return { 
+            active: false, 
+            label: null, 
+            xpMult: 1.0, 
+            goldMult: 1.0, 
+            dropMult: 1.0 
+        };
+    }
+
+    const now = Date.now();
+    // Fallback for saves without startTime (should be handled in Context load, but safety here)
+    const startTime = state.startTime || now; 
+    
+    const elapsed = now - startTime;
+    const durationMs = EARLY_GAME_CONFIG.durationMinutes * 60 * 1000;
+
+    if (elapsed >= durationMs) {
+        return { 
+            active: false, 
+            label: null, 
+            xpMult: 1.0, 
+            goldMult: 1.0, 
+            dropMult: 1.0 
+        };
+    }
+
+    // Linear Decay over duration
+    const progress = elapsed / durationMs;
+    const decayFactor = 1.0 - progress; // 1.0 -> 0.0
+
+    const xpMult = 1.0 + ((EARLY_GAME_CONFIG.maxXpMult - 1.0) * decayFactor);
+    const goldMult = 1.0 + ((EARLY_GAME_CONFIG.maxGoldMult - 1.0) * decayFactor);
+    const dropMult = 1.0 + ((EARLY_GAME_CONFIG.maxDropMult - 1.0) * decayFactor);
+
+    return {
+        active: true,
+        label: "Rookie Rush",
+        xpMult,
+        goldMult,
+        dropMult
+    };
+};
+
+export const isEarlyGamePhase = (state: GameState): boolean => {
+    return getEarlyGameBoost(state).active;
 };
 
 // --- REALM CALCULATIONS ---
@@ -30,18 +124,26 @@ export const calculateRealmXpRequired = (rank: number): number => {
 
 export const getRealmBonuses = (realm: RealmState, dungeonId?: string) => {
     const rank = realm.realmRank;
+    const tier = realm.realmTier || 1; // Default to 1 for legacy/initial
     
-    // Base Realm Effects
-    let enemyMult = 1 + (rank * REALM_CONFIG.baseEnemyScaling);
-    let lootRolls = rank * REALM_CONFIG.baseLootQuantity;
-    let rarityShift = rank * REALM_CONFIG.baseRarityShift;
-    let lootYieldMult = 1.0;
+    // --- 1. HARD DIFFICULTY (Tier Based) ---
+    // Enemies only get stronger on Ascension (Tier Up)
+    // Formula: 1.0 + (Tier-1 * Scaling)
+    // Tier 1: 1.0x, Tier 2: 1.25x, Tier 3: 1.5x
+    let enemyMult = 1 + ((tier - 1) * REALM_CONFIG.tierEnemyScaling);
+
+    // --- 2. SOFT REWARDS (Rank Based) ---
+    // Loot quantity and quality improves during the run
+    let lootRolls = rank * REALM_CONFIG.rankLootQuantity;
+    let rarityShift = rank * REALM_CONFIG.rankRarityShift;
+    let lootYieldMult = 1 + (rank * REALM_CONFIG.rankLootYield);
 
     // Apply Active Modifiers if dungeon provided
     if (dungeonId && realm.activeModifiers[dungeonId]) {
         realm.activeModifiers[dungeonId].forEach(modId => {
             const mod = REALM_MODIFIERS.find(m => m.id === modId);
             if (mod) {
+                // Modifiers multiply on top of Tier scaling
                 enemyMult *= mod.enemyPowerMult;
                 lootYieldMult *= mod.lootYieldMult;
                 rarityShift += mod.rarityShiftBonus;
@@ -57,61 +159,126 @@ export const getRealmBonuses = (realm: RealmState, dungeonId?: string) => {
     };
 };
 
-export const calculateMasteryBonus = (state: GameState, type: 'COMBAT' | 'GATHERING' | 'FISHING') => {
-    const mastery = state.guildMastery;
-    if (!mastery) return { power: 1, efficiency: 1, yield: 1, rareChance: 0 };
+export const calculateMasteryBonus = (state: GameState): MasteryEffects => {
+    const { combat, gathering, fishing } = state.guildMastery;
 
-    if (type === 'COMBAT') {
-        const lvl = mastery.combat.level;
-        return {
-            power: 1 + (lvl * MASTERY_BONUSES.combat.powerPerLevel),
-            damage: 1 + (lvl * MASTERY_BONUSES.combat.damagePerLevel),
-            efficiency: 1,
-            yield: 1,
-            rareChance: 0
-        };
-    } else if (type === 'GATHERING') {
-        const lvl = mastery.gathering.level;
-        return {
-            power: 1,
-            efficiency: 1 + (lvl * MASTERY_BONUSES.gathering.efficiencyPerLevel),
-            yield: 1 + (lvl * MASTERY_BONUSES.gathering.yieldPerLevel),
-            rareChance: 0
+    const getMilestones = (lvl: number, config: any) => {
+        const achieved: string[] = [];
+        Object.keys(config.milestones).forEach(mLevel => {
+            if (lvl >= parseInt(mLevel)) achieved.push(config.milestones[mLevel]);
+        });
+        return achieved;
+    };
+
+    return {
+        combat: {
+            durationReduction: Math.min(0.5, combat.level * MASTERY_CONFIG.combat.durationRedPerLevel),
+            damageConsistency: 1 + (combat.level >= 5 ? 0.1 : 0), // Lvl 5 Milestone
+            xpBonus: 1 + (combat.level * MASTERY_CONFIG.combat.xpBonusPerLevel),
+            milestones: getMilestones(combat.level, MASTERY_CONFIG.combat)
+        },
+        gathering: {
+            durationReduction: Math.min(0.5, gathering.level * MASTERY_CONFIG.gathering.durationRedPerLevel),
+            doubleYieldChance: gathering.level * MASTERY_CONFIG.gathering.doubleYieldChancePerLevel,
+            rareMaterialBonus: gathering.level >= 15 ? 1 : 0, // Lvl 15 Milestone
+            milestones: getMilestones(gathering.level, MASTERY_CONFIG.gathering)
+        },
+        fishing: {
+            durationReduction: Math.min(0.5, fishing.level * MASTERY_CONFIG.fishing.durationRedPerLevel),
+            doubleCatchChance: fishing.level * MASTERY_CONFIG.fishing.doubleCatchChancePerLevel,
+            rareFishBonus: fishing.level * MASTERY_CONFIG.fishing.rareBonusPerLevel,
+            milestones: getMilestones(fishing.level, MASTERY_CONFIG.fishing)
         }
-    } else {
-        const lvl = mastery.fishing.level;
-        return {
-            power: 1,
-            efficiency: 1 + (lvl * MASTERY_BONUSES.fishing.speedPerLevel),
-            yield: 1,
-            rareChance: lvl * MASTERY_BONUSES.fishing.rareChancePerLevel
-        }
+    };
+};
+
+// --- DUNGEON MECHANIC SYSTEM ---
+
+export const applyDungeonMechanic = (mechanicId: DungeonMechanicId | undefined, tier: number, rank: number): MechanicModifier => {
+    // Default Modifier (No effect)
+    const base: MechanicModifier = {
+        enemyHpMult: 1.0,
+        powerReqMult: 1.0,
+        xpYieldMult: 1.0,
+        goldYieldMult: 1.0,
+        lootRollBonus: 0,
+        durationMult: 1.0,
+        description: ''
+    };
+
+    if (!mechanicId || mechanicId === 'NONE') return base;
+
+    switch (mechanicId) {
+        case 'SWARM':
+            base.enemyHpMult = 0.5; // 2x Kill Speed
+            base.xpYieldMult = 0.6; 
+            base.goldYieldMult = 0.6; 
+            base.lootRollBonus = 1; 
+            base.description = "Swarm: Enemy HP halved. Loot volume increased.";
+            break;
+
+        case 'PACK_TACTICS':
+            base.powerReqMult = 1.30 + (tier * 0.05); 
+            base.goldYieldMult = 1.50; 
+            base.description = `Pack Tactics: Power Req +30%. Gold +50%.`;
+            break;
+
+        case 'UNDEAD_RESILIENCE':
+            base.enemyHpMult = 1.50; 
+            base.xpYieldMult = 2.00; 
+            base.description = "Undead: Enemy HP +50%. XP Yield +100%.";
+            break;
+
+        case 'RESOURCE_SURGE':
+            base.durationMult = 0.8; 
+            base.description = "Surge: Contract duration -20%.";
+            break;
+            
+        case 'ELITE_HUNT':
+            base.powerReqMult = 1.5;
+            base.lootRollBonus = 2; 
+            base.xpYieldMult = 1.5;
+            base.description = "Elite: High Power Req. +2 Loot Rolls.";
+            break;
     }
+
+    return base;
 };
 
 export const calculateEffectiveDungeonStats = (dungeon: Dungeon, realm: RealmState, gameState?: GameState) => {
     const bonuses = getRealmBonuses(realm, dungeon.id);
     let lootMult = bonuses.lootYieldMultiplier;
 
+    // 1. Get Base Mechanic Modifiers
+    const mech = applyDungeonMechanic(dungeon.mechanicId, dungeon.tier, realm.realmRank);
+
     // Apply Mastery if GameState is provided
+    let masteryXpBonus = 1.0;
+    
     if (gameState) {
-        if (dungeon.type === ContractType.GATHERING) {
-            const m = calculateMasteryBonus(gameState, 'GATHERING');
-            lootMult *= m.yield;
+        const mastery = calculateMasteryBonus(gameState);
+        if (dungeon.type === ContractType.DUNGEON) {
+            masteryXpBonus = mastery.combat.xpBonus;
+        } else if (dungeon.type === ContractType.GATHERING) {
+            // Gathering Yield handled in loop logic via Double Yield Chance
         } else if (dungeon.type === ContractType.FISHING) {
-            // Fishing mastery affects rare chance primarily, but let's assume basic yield too
-            const m = calculateMasteryBonus(gameState, 'FISHING');
-            // Fishing yield logic is slightly different, usually 1 fish per catch
+            // Fishing Yield handled via Streak logic
         }
     }
     
+    // Apply Mechanic Multipliers to Base Values
+    const finalPower = Math.floor(dungeon.recommendedPower * bonuses.enemyPowerMultiplier * mech.powerReqMult);
+    
     return {
-        recommendedPower: Math.floor(dungeon.recommendedPower * bonuses.enemyPowerMultiplier),
-        dropChance: dungeon.dropChance, // Base chance remains, extra rolls handled separately
-        lootMultiplier: lootMult
+        recommendedPower: finalPower,
+        dropChance: dungeon.dropChance,
+        lootMultiplier: lootMult, 
+        mechanic: mech,
+        masteryXpBonus
     };
 };
 
+// ... (Existing XP/Traits/SkillTree/Specialization logic logic remains unchanged) ...
 // --- XP & LEVELING ---
 
 export const calculateXpRequired = (level: number, type: 'ADVENTURER' | 'MASTERY'): number => {
@@ -139,7 +306,6 @@ export const processXpGain = (currentLevel: number, currentXp: number, amount: n
 // --- TRAIT GENERATION ---
 export const generateTraits = (count: number = 3): Trait[] => {
     const traits: Trait[] = [];
-    // Filter pools
     const common = TRAIT_POOL.filter(t => t.rarity === 'Common');
     const rare = TRAIT_POOL.filter(t => t.rarity === 'Rare');
     const epic = TRAIT_POOL.filter(t => t.rarity === 'Epic');
@@ -152,9 +318,8 @@ export const generateTraits = (count: number = 3): Trait[] => {
 
         const template = pool[Math.floor(Math.random() * pool.length)];
         
-        // Ensure uniqueness per adventurer
         if (traits.some(t => t.name === template.name)) {
-            i--; // Retry
+            i--; 
             continue;
         }
 
@@ -171,9 +336,7 @@ export const generateSkillTree = (role: AdventurerRole): { tree: SkillNode[], ar
     const pools = STAT_POOLS[role];
     const capstones = CAPSTONE_POOL[role];
     
-    // Helper to get nodes, allowing some randomness in pool selection for variety
     const getRoot = () => getRandomFromPool(Math.random() > 0.3 ? pools.root : pools.offense); 
-    // Force some utility/gathering into the mix
     const getSide = () => getRandomFromPool(Math.random() > 0.5 ? pools.offense : pools.defense);
     const getExtension = () => getRandomFromPool(Math.random() > 0.5 ? pools.hybrid : pools.root);
     const getCap = () => getRandomFromPool(capstones);
@@ -185,24 +348,113 @@ export const generateSkillTree = (role: AdventurerRole): { tree: SkillNode[], ar
     const r2Tmpl = getExtension();
     const capTmpl = getCap();
 
-    // Build the specific tree
     const tree: SkillNode[] = [
-        // 1. Root
         { ...rootTmpl, id: 'root', x: 50, y: 90, requires: [], maxLevel: 1, cost: 1 },
-        // 2. Tier 2 (Split) - MUTUALLY EXCLUSIVE
         { ...l1Tmpl, id: 't2_l', x: 30, y: 70, requires: ['root'], maxLevel: 1, cost: 1, exclusiveGroup: 'tier2' },
         { ...r1Tmpl, id: 't2_r', x: 70, y: 70, requires: ['root'], maxLevel: 1, cost: 1, exclusiveGroup: 'tier2' },
-        // 3. Tier 3 (Extension)
         { ...l2Tmpl, id: 't3_l', x: 20, y: 45, requires: ['t2_l'], maxLevel: 1, cost: 2 },
         { ...r2Tmpl, id: 't3_r', x: 80, y: 45, requires: ['t2_r'], maxLevel: 1, cost: 2 },
-        // 4. Capstone 
         { ...capTmpl, id: 'cap', x: 50, y: 20, requires: ['t3_l', 't3_r'], maxLevel: 1, cost: 3 }
     ];
 
     return { tree, archetype: capTmpl.name }; 
 };
 
-// Determine "Class" Label based on Traits
+// ... (Specialization logic remains unchanged) ...
+// --- SPECIALIZATION LOGIC ---
+
+export const calculateAdventurerSpecialization = (adventurer: Adventurer): SpecializationData => {
+    let combat = 10; // Base Bias
+    let gathering = 0;
+    let fishing = 0;
+
+    if (adventurer.traits) {
+        adventurer.traits.forEach(t => {
+            if (t.type === 'COMBAT') combat += 5;
+            if (t.type === 'GATHERING') gathering += 5;
+            if (t.type === 'FISHING') fishing += 5;
+            if (t.type === 'HYBRID') { combat += 2; gathering += 2; fishing += 1; }
+        });
+    }
+
+    if (adventurer.unlockedSkills && adventurer.skillTree) {
+        adventurer.unlockedSkills.forEach(skillId => {
+            const node = adventurer.skillTree.find(n => n.id === skillId);
+            if (node) {
+                if (['damage', 'health', 'crit', 'speed', 'speed_crit', 'all'].includes(node.statTarget || '')) combat += 2;
+                if (['loot', 'gold'].includes(node.statTarget || '')) {
+                    gathering += 2;
+                    if (node.statTarget === 'loot') fishing += 1; 
+                }
+            }
+        });
+    }
+
+    Object.values(adventurer.slots).forEach(item => {
+        if (item) {
+            item.stats.forEach(stat => {
+                if (['Damage', 'Health', 'Crit Chance'].includes(stat.name)) combat += 2;
+                if (['Gold Gain'].includes(stat.name)) gathering += 3;
+                if (['Loot Luck'].includes(stat.name)) { gathering += 2; fishing += 3; }
+            });
+        }
+    });
+
+    const maxScore = Math.max(combat, gathering, fishing);
+    let type: SpecializationType = 'HYBRID';
+    let label = 'Hybrid';
+    let color = 'text-purple-400';
+    let bonus = 0.05;
+
+    const scores = [combat, gathering, fishing].sort((a,b) => b-a);
+    const secondBest = scores[1] || 0;
+
+    if (maxScore > secondBest * 1.2 || (maxScore > 15 && secondBest < 10)) {
+        if (maxScore === combat) {
+            type = 'COMBAT';
+            label = 'Combat Specialist';
+            color = 'text-red-400';
+            bonus = 0.10;
+        } else if (maxScore === gathering) {
+            type = 'GATHERING';
+            label = 'Gathering Specialist';
+            color = 'text-emerald-400';
+            bonus = 0.10;
+        } else if (maxScore === fishing) {
+            type = 'FISHING';
+            label = 'Fishing Specialist';
+            color = 'text-blue-400';
+            bonus = 0.10;
+        }
+    } else {
+        type = 'HYBRID';
+        label = 'Hybrid Expert';
+        color = 'text-purple-400';
+        bonus = 0.05;
+    }
+
+    return {
+        type,
+        label,
+        scores: { combat, gathering, fishing },
+        efficiencyBonus: bonus,
+        color
+    };
+};
+
+export const getSpecializationDisplayData = (adventurer: Adventurer) => {
+    return calculateAdventurerSpecialization(adventurer);
+};
+
+export const getAscensionBonuses = (ascensionCount: number) => {
+    return {
+        powerGrowth: ascensionCount * 0.10, 
+        goldGain: ascensionCount * 0.20, 
+        rarityShift: ascensionCount * 0.5, 
+        durationReduction: Math.min(0.5, ascensionCount * 0.05) 
+    };
+};
+
 const analyzeSpecialization = (role: AdventurerRole, traits: Trait[]): string => {
     let combatScore = 0;
     let gatherScore = 0;
@@ -220,13 +472,11 @@ const analyzeSpecialization = (role: AdventurerRole, traits: Trait[]): string =>
     if (combatScore >= 3) return `Battle ${role}`;
     if (gatherScore > 0 && fishScore > 0) return `Survivalist ${role}`;
     
-    // Default Role Titles
     if (role === AdventurerRole.WARRIOR) return "Vanguard";
     if (role === AdventurerRole.ROGUE) return "Operative";
     return "Arcanist";
 };
 
-// Factory Function
 export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
     const roles = Object.values(AdventurerRole);
     const role = fixedRole || roles[Math.floor(Math.random() * roles.length)];
@@ -240,20 +490,11 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
     else if (rand > 0.50) rarity = Rarity.UNCOMMON;
 
     const multiplier = ADVENTURER_RARITY_MULTIPLIERS[rarity];
-
-    // Generate 3 Traits
     const traits = generateTraits(3);
-    
-    // Generate Tree
     const { tree, archetype } = generateSkillTree(role);
-
-    // Calculate Specialization Label
     const specialization = analyzeSpecialization(role, traits);
-
-    // Name & Title Generation
     const name = ADVENTURER_NAMES[Math.floor(Math.random() * ADVENTURER_NAMES.length)];
     
-    // Determine title index based on rarity
     const titleOptions = TITLES_BY_ROLE[role];
     let titleIndex = 0;
     if (rarity === Rarity.LEGENDARY) titleIndex = Math.floor(Math.random() * 2) + 8; 
@@ -264,7 +505,6 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
     
     titleIndex = Math.max(0, Math.min(titleIndex, titleOptions.length - 1));
     const title = titleOptions[titleIndex];
-
     const initialXpReq = calculateXpRequired(1, 'ADVENTURER');
 
     return {
@@ -273,7 +513,7 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
         title,
         role,
         rarity,
-        level: 1, // Combat Level
+        level: 1, 
         xp: 0,
         xpToNextLevel: initialXpReq,
         gatheringLevel: 1,
@@ -281,7 +521,7 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
         fishingLevel: 1,
         fishingXp: 0,
         traits: traits,
-        traitId: 'legacy', // Deprecated but kept for type safety
+        traitId: 'legacy', 
         specialization,
         skillPoints: 0,
         unlockedSkills: [],
@@ -297,7 +537,6 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
     };
 };
 
-// Helper to get active modifiers for a list of adventurers
 export const getActiveModifiers = (adventurerIds: string[], state: GameState): string[] => {
     const modifiers: string[] = [];
     adventurerIds.forEach(id => {
@@ -312,22 +551,11 @@ export const getActiveModifiers = (adventurerIds: string[], state: GameState): s
     return modifiers;
 };
 
-// --- ASCENSION BONUSES ---
-export const getAscensionBonuses = (ascensionCount: number) => {
-    return {
-        powerGrowth: ascensionCount * 0.10, // +10% power per ascension
-        goldGain: ascensionCount * 0.20, // +20% gold per ascension
-        rarityShift: ascensionCount * 0.5, // +0.5 shift points per ascension
-        durationReduction: Math.min(0.5, ascensionCount * 0.05) // -5% duration per ascension (cap 50%)
-    };
-};
-
 interface EffectiveStats {
     damage: number;
     health: number;
     speed: number;
     critChance: number;
-    // Helper fields for calculation only
     goldGain: number;
     xpGain: number;
     lootLuck: number;
@@ -341,33 +569,28 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         lootLuck: 0
     };
 
-    // 1. Global Upgrades
     const trainingLevel = state.upgrades['recruit_training'] || 0;
     const trainingBonus = UPGRADES.find(u => u.id === 'recruit_training')?.effect(trainingLevel) || 0;
     stats.damage += trainingBonus;
 
-    // 2. Class Skills (Legacy)
+    // ... Skills, Traits, Tree Modifiers application ...
     const skills = CLASS_SKILLS[adventurer.role] || [];
     skills.forEach(skill => {
         if (adventurer.level >= skill.unlockLevel) {
             if (skill.id === 'war_1') stats.health += 30;
             if (skill.id === 'war_2') stats.damage *= 1.15;
             if (skill.id === 'war_3') { stats.health += 50; stats.damage *= 1.10; }
-            
             if (skill.id === 'rog_1') stats.speed *= 1.10;
             if (skill.id === 'rog_2') stats.critChance += 0.10;
             if (skill.id === 'rog_3') { stats.damage *= 1.30; }
-
             if (skill.id === 'mag_1') stats.damage += 5;
             if (skill.id === 'mag_2') { stats.damage *= 1.20; stats.health *= 0.90; }
             if (skill.id === 'mag_3') stats.damage *= 1.40;
         }
     });
 
-    // 3. Traits (New System)
     if (adventurer.traits) {
         adventurer.traits.forEach(trait => {
-            // Fix: Rehydrate function if missing (loaded from JSON)
             if (typeof trait.effect === 'function') {
                 trait.effect(stats);
             } else {
@@ -379,7 +602,6 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         });
     }
 
-    // 4. Skill Tree (Stats & Modifiers)
     const activeModifiers: string[] = [];
 
     if (adventurer.unlockedSkills && adventurer.skillTree) {
@@ -387,12 +609,9 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         adventurer.unlockedSkills.forEach(skillId => {
             const node = tree.find(n => n.id === skillId);
             if (node) {
-                // Modifiers
                 if (node.effectType === 'MODIFIER' && node.modifier) {
                     activeModifiers.push(node.modifier);
                 }
-
-                // Apply node effects
                 if (node.effectType === 'STAT') {
                     if (node.statTarget === 'damage' || node.statTarget === 'all') stats.damage *= (1 + node.effectValue);
                     if (node.statTarget === 'health' || node.statTarget === 'all') stats.health *= (1 + node.effectValue);
@@ -408,7 +627,6 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         });
     }
 
-    // 5. Modifier Pre-Calculation (Base Stat alterations)
     if (activeModifiers.includes('RUSH')) {
         stats.speed *= 1.25;
         stats.health *= 0.85;
@@ -438,16 +656,23 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
          stats.xpGain -= 0.10;
     }
 
-    // 6. Gear Stats
     const isWeaponMaster = activeModifiers.includes('WEAPON_MASTER');
+
+    // --- ITEM SET LOGIC ---
+    const equippedSets: Record<string, number> = {};
 
     Object.values(adventurer.slots).forEach((item) => {
         if (item) {
-          // Rule: Weapon Master disables Trinkets stats entirely (effectively unequipped)
+          // Count Sets
+          if (item.setId) {
+              equippedSets[item.setId] = (equippedSets[item.setId] || 0) + 1;
+          }
+
+          // Apply Item Stats
           if (isWeaponMaster && item.type === ItemType.TRINKET) return;
 
           let multiplier = 1.0;
-          if (isWeaponMaster && item.type === ItemType.WEAPON) multiplier = 2.0; // DOUBLE STATS
+          if (isWeaponMaster && item.type === ItemType.WEAPON) multiplier = 2.0; 
 
           item.stats.forEach((stat) => {
             if (stat.name === 'Damage') {
@@ -467,19 +692,52 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
             if (stat.name === 'Gold Gain') stats.goldGain += (stat.value * multiplier) / 100;
             if (stat.name === 'Loot Luck') stats.lootLuck += (stat.value * multiplier) / 100;
           });
+
+          // Apply Unique Effects (If simple stat mod)
+          if (item.uniqueEffectId) {
+              const unique = UNIQUE_EFFECT_REGISTRY.find(u => u.id === item.uniqueEffectId);
+              if (unique && unique.effect) unique.effect(stats);
+          }
         }
     });
 
-    // 7. Ascension & Mastery Bonus
+    // Apply Active Sets
+    Object.entries(equippedSets).forEach(([setId, count]) => {
+        const setDef = ITEM_SETS.find(s => s.id === setId);
+        if (setDef && count >= setDef.requiredPieces) {
+            setDef.effect(stats);
+        }
+    });
+
+    // 7. Specialization Bonus
+    const spec = calculateAdventurerSpecialization(adventurer);
+    const bonus = 1 + spec.efficiencyBonus;
+
+    if (spec.type === 'COMBAT') {
+        stats.damage *= bonus;
+        stats.health *= bonus;
+    } else if (spec.type === 'GATHERING') {
+        stats.goldGain = (stats.goldGain + 1) * bonus - 1; 
+        stats.lootLuck += spec.efficiencyBonus; 
+    } else if (spec.type === 'FISHING') {
+        stats.lootLuck += spec.efficiencyBonus * 2; 
+    } else {
+        // Hybrid
+        stats.damage *= (1 + (spec.efficiencyBonus / 2));
+        stats.goldGain += (spec.efficiencyBonus / 2);
+    }
+
     const ascensionBonuses = getAscensionBonuses(state.ascensionCount || 0);
-    const masteryBonus = calculateMasteryBonus(state, 'COMBAT');
+    const totalPowerMult = (1 + ascensionBonuses.powerGrowth);
 
-    // Combine Multipliers
-    const totalPowerMult = (1 + ascensionBonuses.powerGrowth) * masteryBonus.power;
-    const totalDmgMult = masteryBonus.damage;
-
-    stats.damage *= (totalPowerMult * totalDmgMult);
+    stats.damage *= totalPowerMult;
     stats.health *= totalPowerMult;
+
+    // --- APPLY CONSUMABLE BUFFS ---
+    const consumableBonuses = calculateConsumableBonuses(state.activeConsumables || []);
+    stats.damage *= consumableBonuses.POWER;
+    stats.goldGain = (stats.goldGain + 1) * consumableBonuses.GOLD - 1;
+    stats.xpGain = (stats.xpGain + 1) * consumableBonuses.XP - 1;
 
     return {
         damage: Math.floor(stats.damage),
@@ -527,20 +785,56 @@ export const calculateConservativePower = (adventurer: Adventurer, state: GameSt
     return calculateAdventurerPower(effectiveAdv, state);
 };
 
-export const calculateItemRating = (item: Item): number => {
+// --- ITEM POTENTIAL & IDENTITY ---
+
+export const calculateItemPotential = (item: Item): { score: number, tier: Item['visualTier'] } => {
     let score = 0;
+    
+    // 1. Base Stat Weighting
     item.stats.forEach(stat => {
-        if (stat.name === 'Damage') score += stat.value * 5; 
-        else if (stat.name === 'Health') score += stat.value * 1; 
-        else if (stat.name === 'Speed') score += stat.value * 10;
-        else if (stat.name === 'Crit Chance') score += stat.value * 8;
-        else if (stat.name === 'Gold Gain') score += stat.value * 3;
-        else if (stat.name === 'Loot Luck') score += stat.value * 3;
-        else score += stat.value;
+        let val = stat.value;
+        if (stat.isPercentage) val *= 10; // Weight % stats higher
+        
+        // Multipliers based on stat importance
+        if (stat.name === 'Damage') score += val * 1.5;
+        else if (stat.name === 'Health') score += val * 0.5;
+        else if (stat.name === 'Speed') score += val * 2.0;
+        else if (stat.name === 'Crit Chance') score += val * 2.0;
+        else score += val;
     });
-    return Math.floor(score);
+
+    // 2. Rarity Multiplier
+    const rarityMult = {
+        'Common': 1,
+        'Uncommon': 1.2,
+        'Rare': 1.5,
+        'Epic': 2.0,
+        'Legendary': 3.0
+    }[item.rarity] || 1;
+
+    // 3. Unique/Set Bonuses
+    if (item.setId) score *= 1.2;
+    if (item.uniqueEffectId) score *= 1.5;
+
+    // Normalize roughly to 0-100+ scale based on level
+    const normalizedScore = Math.floor((score * rarityMult) / (1 + item.level * 0.5));
+
+    // Determine Tier
+    let tier: Item['visualTier'] = 'D';
+    if (normalizedScore > 150) tier = 'S';
+    else if (normalizedScore > 100) tier = 'A';
+    else if (normalizedScore > 60) tier = 'B';
+    else if (normalizedScore > 30) tier = 'C';
+
+    return { score: Math.floor(normalizedScore), tier };
 };
 
+export const calculateItemRating = (item: Item): number => {
+    // Kept for backward compatibility, forwards to new system
+    return calculateItemPotential(item).score; 
+};
+
+// ... (Rest of existing functions) ...
 export const calculateAdventurerDps = (adventurer: Adventurer, state: GameState): number => {
     const stats = getAdventurerStats(adventurer, state);
     return (stats.damage * (1 + stats.critChance)) * stats.speed;
@@ -597,14 +891,13 @@ export const calculateDungeonDuration = (baseDuration: number, state: GameState,
       }
   }
 
-  // Mastery Bonus: Fishing speed
-  const fishingMastery = calculateMasteryBonus(state, 'FISHING');
-  // Only apply to duration generally if we knew context, but here we don't know dungeon type easily.
-  // We'll apply it in context instead or if we had dungeon type passed in.
-  // For now, let's keep logic simple: speed upgrades are global.
-
+  const mastery = calculateMasteryBonus(state);
   const asc = getAscensionBonuses(state.ascensionCount || 0);
   duration *= (1 - asc.durationReduction);
+
+  // Apply Consumable Speed Bonus
+  const consumableBonuses = calculateConsumableBonuses(state.activeConsumables || []);
+  duration *= consumableBonuses.SPEED;
 
   return duration;
 };
@@ -672,7 +965,6 @@ export const calculateRunSnapshot = (adventurerIds: string[], state: GameState):
 };
 
 export const generateAdventurer = (id: string, _placeholderName?: string): Adventurer => {
-    // This function is kept for backward compatibility but forwards to generateCandidate
     return generateCandidate();
 };
 
@@ -695,7 +987,6 @@ export const calculateRarityWeights = (
     const playerShift = (rarityBonusPercent * 100) * 0.5; 
     const asc = getAscensionBonuses(ascensionCount);
     
-    // Realm Evolution Shifts
     let realmShift = 0;
     if (realmState) {
         const bonuses = getRealmBonuses(realmState, dungeonId);
@@ -809,20 +1100,28 @@ export const generateRandomAffix = (level: number, rarity: Rarity, excludeNames:
     };
 };
 
-export const generateItem = (dungeonLevel: number, forcedRarity: Rarity, prestigeUpgrades: { [id: string]: number } = {}): Item => {
+export const generateItem = (dungeonLevel: number, forcedRarity: Rarity, prestigeUpgrades: { [id: string]: number } = {}, specificType?: ItemType, specificSubtype?: WeaponType): Item => {
   const rarity = forcedRarity;
   const config = RARITY_CONFIG[rarity];
 
-  const typeRoll = Math.random();
-  const type = typeRoll < 0.33 ? ItemType.WEAPON : typeRoll < 0.66 ? ItemType.ARMOR : ItemType.TRINKET;
+  let type = specificType;
+  if (!type) {
+      const typeRoll = Math.random();
+      type = typeRoll < 0.33 ? ItemType.WEAPON : typeRoll < 0.66 ? ItemType.ARMOR : ItemType.TRINKET;
+  }
 
   let subtype = WeaponType.NONE;
   let classRestriction: AdventurerRole[] = [];
   let nameSuffix = "";
 
   if (type === ItemType.WEAPON) {
-      const weaponTypes = [WeaponType.SWORD, WeaponType.BLUNT, WeaponType.DAGGER, WeaponType.BOW, WeaponType.STAFF, WeaponType.BOOK];
-      subtype = weaponTypes[Math.floor(Math.random() * weaponTypes.length)];
+      if (specificSubtype) {
+          subtype = specificSubtype;
+      } else {
+          const weaponTypes = [WeaponType.SWORD, WeaponType.BLUNT, WeaponType.DAGGER, WeaponType.BOW, WeaponType.STAFF, WeaponType.BOOK];
+          subtype = weaponTypes[Math.floor(Math.random() * weaponTypes.length)];
+      }
+      
       classRestriction = Object.keys(CLASS_WEAPONS).filter(role => 
           CLASS_WEAPONS[role as AdventurerRole].includes(subtype)
       ) as AdventurerRole[];
@@ -858,19 +1157,45 @@ export const generateItem = (dungeonLevel: number, forcedRarity: Rarity, prestig
      affixesGenerated++;
   }
 
+  // --- ITEM IDENTITY ROLL ---
+  let assignedSetId: string | undefined = undefined;
+  let assignedUniqueId: string | undefined = undefined;
+  let identityTag: string | undefined = undefined;
+
+  // 1. Roll for Set (Rare and above)
+  if ((rarity === Rarity.RARE || rarity === Rarity.EPIC || rarity === Rarity.LEGENDARY) && Math.random() < 0.15) {
+      const set = ITEM_SETS[Math.floor(Math.random() * ITEM_SETS.length)];
+      assignedSetId = set.id;
+      nameSuffix = `of ${set.name}`;
+  }
+
+  // 2. Roll for Legendary Unique Effect
   if (rarity === Rarity.LEGENDARY) {
-      const unique = UNIQUE_EFFECTS[Math.floor(Math.random() * UNIQUE_EFFECTS.length)];
+      const unique = UNIQUE_EFFECT_REGISTRY[Math.floor(Math.random() * UNIQUE_EFFECT_REGISTRY.length)];
+      assignedUniqueId = unique.id;
+      nameSuffix = `of ${unique.name}`;
+      identityTag = "Ancient Artifact";
+  } else if (rarity === Rarity.EPIC && Math.random() < 0.2) {
+      // Fallback unique stats if not mechanics-based unique (now applies to lucky Epics)
+      const uniqueStat = UNIQUE_EFFECTS[Math.floor(Math.random() * UNIQUE_EFFECTS.length)];
       stats.push({
-          name: unique.name, 
-          value: unique.value,
+          name: uniqueStat.name, 
+          value: uniqueStat.value,
           isPercentage: true,
           tier: 0 
       });
   }
 
-  const goldValue = Math.ceil(statBudget * 3 * (1 + affixesGenerated * 0.2));
+  // 3. Flavor Tags based on main stat strength
+  if (!identityTag && mainStatTier <= 2) {
+      identityTag = "Pristine";
+  }
 
-  return {
+  // Value calculation
+  const goldValue = Math.ceil(statBudget * 3 * (1 + affixesGenerated * 0.2) * (assignedSetId ? 1.5 : 1) * (assignedUniqueId ? 2 : 1));
+
+  // Construct Temporary Item for Potential Calculation
+  const tempItem: Item = {
     id: crypto.randomUUID(),
     name: `${rarity} ${nameSuffix}`, 
     type,
@@ -880,6 +1205,19 @@ export const generateItem = (dungeonLevel: number, forcedRarity: Rarity, prestig
     level: dungeonLevel,
     stats,
     value: goldValue,
+    potential: 0,
+    visualTier: 'D',
+    setId: assignedSetId,
+    uniqueEffectId: assignedUniqueId,
+    identityTag
+  };
+
+  const potential = calculateItemPotential(tempItem);
+
+  return {
+      ...tempItem,
+      potential: potential.score,
+      visualTier: potential.tier
   };
 };
 
@@ -904,12 +1242,14 @@ export const calculatePrestigeGain = (totalLifetimeGold: number): number => {
 
 export const calculateItemUpgradeCost = (item: Item, type: 'ENCHANT' | 'REROLL'): number => {
     const rarityMult = CRAFTING_RARITY_MULTIPLIERS[item.rarity];
+    // Potential adds cost scaling
+    const potentialMult = 1 + (item.potential / 200); 
     
     if (type === 'ENCHANT') {
         const statsCount = item.stats.length;
-        return Math.floor(ENCHANT_COST_BASE * item.level * rarityMult * statsCount);
+        return Math.floor(ENCHANT_COST_BASE * item.level * rarityMult * statsCount * potentialMult);
     } else {
-        return Math.floor(REROLL_COST_BASE * item.level * rarityMult);
+        return Math.floor(REROLL_COST_BASE * item.level * rarityMult * potentialMult);
     }
 };
 
