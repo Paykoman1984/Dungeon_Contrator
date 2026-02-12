@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { GameProvider, useGame } from './services/GameContext';
+import { VisualProvider } from './services/VisualContext'; // New Provider
 import { DungeonList } from './components/DungeonList';
 import { AdventurerList } from './components/AdventurerList';
 import { InventoryPanel } from './components/InventoryPanel';
@@ -10,6 +11,7 @@ import { RealmPanel } from './components/RealmPanel';
 import { DungeonResultModal } from './components/DungeonResultModal';
 import { SaveLoadModal } from './components/SaveLoadModal';
 import { RealmLevelUpModal } from './components/RealmLevelUpModal';
+import { RewardOverlay } from './components/RewardOverlay'; 
 import { formatNumber, calculateConservativePower } from './utils/gameMath';
 import { INVENTORY_SIZE } from './constants';
 import { LayoutDashboard, Users, Swords, Package, Landmark, Crown, Globe } from 'lucide-react';
@@ -26,12 +28,13 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+      <RewardOverlay /> 
       <DungeonResultModal />
       <RealmLevelUpModal />
       <SaveLoadModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
       
       {/* Sidebar */}
-      <div className="w-20 md:w-64 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 transition-all">
+      <div className="w-20 md:w-64 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 transition-all z-10">
         <div className="p-4 md:p-6 border-b border-slate-800 flex items-center justify-center md:justify-start gap-3">
           <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <Swords size={18} className="text-white" />
@@ -148,7 +151,9 @@ const SidebarItem: React.FC<{ active: boolean; onClick: () => void; icon: React.
 const App: React.FC = () => {
   return (
     <GameProvider>
-      <AppContent />
+        <VisualProvider>
+            <AppContent />
+        </VisualProvider>
     </GameProvider>
   );
 };

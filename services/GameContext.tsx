@@ -27,7 +27,7 @@ const INITIAL_STATE: GameState = {
   inventory: [],
   materials: {},
   activeRuns: [],
-  activeConsumables: [], // New state for temp buffs
+  activeConsumables: [], 
   unlockedDungeons: ['rat_cellar', 'whispering_woods'],
   upgrades: {},
   prestigeUpgrades: {},
@@ -36,13 +36,12 @@ const INITIAL_STATE: GameState = {
       gathering: { level: 1, xp: 0 },
       fishing: { level: 1, xp: 0 }
   },
-  // --- REALM STATE INIT ---
   realm: {
-      realmTier: 1, // Start at Tier 1
+      realmTier: 1, 
       realmRank: 0,
       realmExperience: 0,
       activeModifiers: {},
-      unlockedModifiers: [] // New state for tracking unlocks
+      unlockedModifiers: []
   },
   lootFilter: {
       unlocked: false,
@@ -64,7 +63,6 @@ const INITIAL_STATE: GameState = {
   rewardEventQueue: []
 };
 
-// Helper for generating events
 const createRewardEvent = (type: RewardEventType, severity: RewardSeverity, message: string, entityId?: string, metadata?: any): RewardEvent => ({
     id: crypto.randomUUID(),
     type,
@@ -114,7 +112,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Deep merge logic for safety
         const baseRealm = parsed.realm || INITIAL_STATE.realm;
         
         return { 
@@ -133,7 +130,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 unlockedModifiers: baseRealm.unlockedModifiers || []
             },
             guildMastery: parsed.guildMastery || INITIAL_STATE.guildMastery,
-            rewardEventQueue: [], // Always start with empty queue on load
+            rewardEventQueue: [],
             activeConsumables: parsed.activeConsumables || []
         };
       } catch (e) {
@@ -143,7 +140,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return INITIAL_STATE;
   });
 
-  // Persist Save
   useEffect(() => {
     const timer = setInterval(() => {
         setState(prev => {
@@ -155,7 +151,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearInterval(timer);
   }, []);
 
-  // Initialize checks
   useEffect(() => {
       setState(prev => {
           let updates: Partial<GameState> = {};
@@ -188,8 +183,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
   }, []);
 
-  // --- Actions ---
-
   const consumeRewardEvents = useCallback(() => {
       let events: RewardEvent[] = [];
       setState(prev => {
@@ -208,17 +201,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const consumable = CONSUMABLES.find(c => c.id === consumableId);
           if (!consumable) return prev;
 
-          // Check Gold
           if (prev.gold < consumable.goldCost) return prev;
-
-          // Check Resources
           if (!checkResourceCost(prev, consumable.cost)) return prev;
 
-          // Deduct
           const newMaterials = deductResources(prev.materials, consumable.cost);
           const newGold = prev.gold - consumable.goldCost;
 
-          // Add Active Effect
           const newActive: ActiveConsumable = {
               id: crypto.randomUUID(),
               defId: consumable.id,
@@ -242,12 +230,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (prev.gold < recipe.goldCost) return prev;
           if (!checkResourceCost(prev, recipe.cost)) return prev;
-          if (prev.inventory.length >= INVENTORY_SIZE) return prev; // Inventory Full
+          if (prev.inventory.length >= INVENTORY_SIZE) return prev;
 
           const newMaterials = deductResources(prev.materials, recipe.cost);
           const newGold = prev.gold - recipe.goldCost;
 
-          // Generate Item using Recipe parameters
           const newItem = generateItem(
               recipe.targetLevel,
               recipe.targetRarity,
@@ -255,9 +242,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
               recipe.targetType,
               recipe.targetSubtype
           );
-
-          // Override name to match recipe if desired, or keep generated name
-          // newItem.name = recipe.name; 
 
           return {
               ...prev,
@@ -539,7 +523,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const cost = Math.floor(upgrade.cost * Math.pow(upgrade.costMultiplier, currentLevel));
           
-          // Resource Cost Check
           let resourceCost: { resourceId: string, amount: number }[] = [];
           if (upgrade.resourceCost) {
               resourceCost = upgrade.resourceCost(currentLevel);
@@ -548,7 +531,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (prev.gold < cost) return prev;
           if (!checkResourceCost(prev, resourceCost)) return prev;
 
-          // Deduct
           const newMaterials = deductResources(prev.materials, resourceCost);
 
           return {
@@ -586,18 +568,15 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const retainedGold = Math.floor(prev.gold * 0.10);
 
-          // Meta State (Persists)
           const nextMetaState = {
               prestigeCurrency: prev.prestigeCurrency + gain,
               ascensionCount: (prev.ascensionCount || 0) + 1,
               unlockedDungeons: prev.unlockedDungeons, 
               prestigeUpgrades: prev.prestigeUpgrades, 
-              // Realm State persists XP and Rank, but Tier Increases
               realm: {
                   ...prev.realm,
                   realmTier: (prev.realm.realmTier || 1) + 1
               },
-              // Mastery State persists through ascension (NEW)
               guildMastery: prev.guildMastery,
               statistics: {
                   ...prev.statistics,
@@ -605,7 +584,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
           };
 
-          // EVENT TRIGGER: Ascension
           const ascensionEvent = createRewardEvent(
               RewardEventType.ASCENSION,
               RewardSeverity.EPIC,
@@ -615,10 +593,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           );
 
           return {
-              ...INITIAL_STATE, // Reset Run State
-              ...nextMetaState, // Apply Meta State
+              ...INITIAL_STATE, 
+              ...nextMetaState, 
               gold: retainedGold + INITIAL_GOLD,
-              startTime: Date.now(), // Reset timer for fresh run
+              startTime: Date.now(), 
               lootFilter: prev.lootFilter,
               recruitmentPool: [],
               refreshCost: TAVERN_CONFIG.baseRefreshCost,
@@ -646,15 +624,21 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           if (!item) return prev;
 
-          const cost = calculateItemUpgradeCost(item, 'ENCHANT');
-          if (prev.gold < cost) return prev;
+          const costs = calculateItemUpgradeCost(item, 'ENCHANT');
+          
+          if (prev.gold < costs.gold) return prev;
+          if (!checkResourceCost(prev, costs.resources)) return prev;
 
           const newItem = { ...item, stats: [...item.stats] };
           const existingNames = newItem.stats.map(s => s.name);
           const newStat = generateRandomAffix(newItem.level, newItem.rarity, existingNames);
           newItem.stats.push(newStat);
 
-          const nextState = { ...prev, gold: prev.gold - cost };
+          const newGold = prev.gold - costs.gold;
+          const newMaterials = deductResources(prev.materials, costs.resources);
+
+          const nextState = { ...prev, gold: newGold, materials: newMaterials };
+          
           if (location === 'INVENTORY') {
               nextState.inventory = prev.inventory.map(i => i.id === itemId ? newItem : i);
           } else {
@@ -692,8 +676,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           if (!item || !item.stats[statIndex]) return prev;
 
-          const cost = calculateItemUpgradeCost(item, 'REROLL');
-          if (prev.gold < cost) return prev;
+          const costs = calculateItemUpgradeCost(item, 'REROLL');
+          
+          if (prev.gold < costs.gold) return prev;
+          if (!checkResourceCost(prev, costs.resources)) return prev;
 
           const newItem = { ...item, stats: [...item.stats] };
           const oldStat = newItem.stats[statIndex];
@@ -713,7 +699,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                newItem.stats[statIndex] = newAffix; 
           }
 
-          const nextState = { ...prev, gold: prev.gold - cost };
+          const newGold = prev.gold - costs.gold;
+          const newMaterials = deductResources(prev.materials, costs.resources);
+
+          const nextState = { ...prev, gold: newGold, materials: newMaterials };
+          
           if (location === 'INVENTORY') {
               nextState.inventory = prev.inventory.map(i => i.id === itemId ? newItem : i);
           } else {
@@ -828,14 +818,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const exists = currentMods.includes(modifierId);
           const isUnlocked = unlocked.includes(modifierId);
           
-          // Unlock Logic
           if (!isUnlocked) {
               const mod = REALM_MODIFIERS.find(m => m.id === modifierId);
               if (!mod || prev.realm.realmRank < mod.unlockRank) return prev;
               
               if (mod.unlockCost) {
                   if (!checkResourceCost(prev, mod.unlockCost)) return prev;
-                  // Unlock Permanently
                   const newMaterials = deductResources(prev.materials, mod.unlockCost);
                   return {
                       ...prev,
@@ -846,7 +834,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       }
                   };
               } else {
-                  // Free unlock (rare case for now)
                   return {
                       ...prev,
                       realm: {
@@ -857,7 +844,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
               }
           }
 
-          // Toggle Logic (Only if unlocked)
           let newMods;
           if (exists) {
               newMods = currentMods.filter(id => id !== modifierId);
@@ -878,7 +864,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
   }, []);
 
-  // --- Game Loop ---
   useEffect(() => {
     const loop = setInterval(() => {
         setState(prev => {
@@ -886,22 +871,18 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             let hasChanges = false;
             let nextState = { ...prev };
             
-            // New events accumulated in this tick
             const newRewardEvents: RewardEvent[] = [];
 
-            // 0a. Clean up expired consumables
             if (prev.activeConsumables.some(ac => now > ac.endTime)) {
                 nextState.activeConsumables = prev.activeConsumables.filter(ac => now <= ac.endTime);
                 hasChanges = true;
             }
 
-            // 0b. Unlock Checks
             const newlyUnlocked: string[] = [];
             DUNGEONS.forEach(d => {
                 if (!prev.unlockedDungeons.includes(d.id)) {
                     if (checkDungeonUnlock(d, prev)) {
                         newlyUnlocked.push(d.id);
-                        // EVENT TRIGGER: Dungeon Unlock
                         newRewardEvents.push(createRewardEvent(
                             RewardEventType.DUNGEON_UNLOCK,
                             RewardSeverity.MAJOR,
@@ -917,7 +898,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 nextState.unlockedDungeons = [...prev.unlockedDungeons, ...newlyUnlocked];
             }
 
-            // 1. Process Finished Runs
             const finishedRuns = prev.activeRuns.filter(r => now >= r.startTime + r.duration);
             
             if (finishedRuns.length > 0) {
@@ -929,16 +909,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 let pityCounter = prev.legendaryPityCounter || 0;
                 const newClears = { ...prev.statistics.dungeonClears };
                 
-                // Mastery XP Buffer
                 const earnedMasteryXp = { combat: 0, gathering: 0, fishing: 0 };
                 
-                // Realm XP Accumulation
                 let realmXpGained = 0;
 
-                // Mastery Calculations for Rewards
                 const masteryEffects = calculateMasteryBonus(prev);
-
-                // Early Game Boost Calculation
                 const earlyBoost = getEarlyGameBoost(prev);
 
                 finishedRuns.forEach(run => {
@@ -949,15 +924,12 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const snapshot = run.snapshot;
                     const contractType = dungeon.type;
 
-                    // Realm Logic
                     const realmStats = calculateEffectiveDungeonStats(dungeon, prev.realm, prev);
                     const mechanic = realmStats.mechanic; 
                     const realmBonuses = getRealmBonuses(prev.realm, dungeon.id);
 
-                    // Update Clear Counts
                     newClears[dungeon.id] = (newClears[dungeon.id] || 0) + 1;
 
-                    // Rewards
                     const isOverpowered = snapshot.power > (realmStats.recommendedPower * 3);
                     let finalGold = 0;
                     let finalXp = 0;
@@ -984,7 +956,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         }
                         finalXp = Math.max(kills, Math.floor(finalXp));
 
-                        // Loot System with Extra Rolls
                         const guildLootBonus = snapshot.lootBonus; 
                         const efficiency = snapshot.dps;
                         const dropChance = calculateDropChance(guildLootBonus, efficiency) * earlyBoost.dropMult; 
@@ -1015,7 +986,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                                  const newItem = generateItem(dungeon.level, rarity, prev.prestigeUpgrades);
                                  runItems.push(newItem);
 
-                                 // EVENT TRIGGER: Epic/Legendary Drop
                                  if (rarity === Rarity.LEGENDARY || rarity === Rarity.EPIC) {
                                      newRewardEvents.push(createRewardEvent(
                                          RewardEventType.ITEM_DROP,
@@ -1027,12 +997,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                             }
                         }
 
-                        // Award Realm XP (Simulated based on dungeon tier)
-                        realmXpGained += dungeon.tier * 5;
-                        earnedMasteryXp.combat += Math.floor(finalXp * 0.1); // 10% of Adv XP goes to Mastery
+                        realmXpGained += dungeon.tier * 20;
+                        earnedMasteryXp.combat += Math.floor(finalXp * 0.1);
 
                     } else {
-                        // GATHERING / FISHING
                         const rolls = Math.floor(run.duration / 5000); 
                         kills = Math.max(1, rolls);
                         
@@ -1061,7 +1029,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                             }
                         }
                         
-                        realmXpGained += dungeon.tier * 2; 
+                        realmXpGained += dungeon.tier * 15;
                         
                         if (contractType === ContractType.GATHERING) earnedMasteryXp.gathering += Math.floor(finalXp * 0.1);
                         if (contractType === ContractType.FISHING) earnedMasteryXp.fishing += Math.floor(finalXp * 0.1);
@@ -1069,17 +1037,14 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                     goldGained += Math.floor(finalGold);
 
-                    // Distribute XP to Adventurers (Multi-Layer)
                     nextState.adventurers = nextState.adventurers.map(a => {
                         if (run.adventurerIds.includes(a.id)) {
                             const share = finalXp / run.adventurerIds.length;
                             const shareAmount = share > 0 && share < 1 ? 1 : Math.floor(share);
 
-                            // Branch based on contract type
                             if (contractType === ContractType.DUNGEON) {
                                 const result = processXpGain(a.level, a.xp, shareAmount, 'ADVENTURER');
                                 
-                                // EVENT TRIGGER: Adventurer Level Up
                                 if (result.newLevel > a.level) {
                                     const isMilestone = result.newLevel % 10 === 0 || result.newLevel === 5;
                                     newRewardEvents.push(createRewardEvent(
@@ -1123,7 +1088,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         return a;
                     });
 
-                    // Filter Logic
                     const filter = prev.lootFilter; 
                     const isFilterActive = filter.unlocked && filter.enabled;
                     const thresholdValue = RARITY_ORDER[filter.minRarity];
@@ -1172,11 +1136,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         autoSalvagedCount,
                         autoSalvagedGold,
                         timestamp: now,
-                        realmXpEarned: contractType === ContractType.DUNGEON ? dungeon.tier * 5 : 0
+                        realmXpEarned: contractType === ContractType.DUNGEON ? dungeon.tier * 20 : dungeon.tier * 15
                     });
                 });
 
-                // Update Statistics & Inventory
                 nextState.statistics.totalGoldEarned += goldGained;
                 nextState.statistics.dungeonsCleared += finishedRuns.length;
                 nextState.statistics.dungeonClears = newClears;
@@ -1195,12 +1158,10 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 nextState.recentReports = [...newReports, ...prev.recentReports].slice(0, 5);
 
-                // PROCESS MASTERY LEVEL UP (Permanent)
                 const currentMastery = { ...nextState.guildMastery };
                 if (earnedMasteryXp.combat > 0) {
                     const res = processXpGain(currentMastery.combat.level, currentMastery.combat.xp, earnedMasteryXp.combat, 'MASTERY');
                     if (res.newLevel > currentMastery.combat.level) {
-                        // EVENT TRIGGER: Mastery Level Up
                         newRewardEvents.push(createRewardEvent(RewardEventType.MASTERY_LEVEL_UP, RewardSeverity.MAJOR, `Combat Mastery Level ${res.newLevel}`));
                     }
                     currentMastery.combat = { level: res.newLevel, xp: res.newXp };
@@ -1221,7 +1182,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 }
                 nextState.guildMastery = currentMastery;
 
-                // PROCESS REALM LEVEL UP (Rank Only)
                 let newRealmRank = nextState.realm.realmRank;
                 let newRealmXp = nextState.realm.realmExperience + realmXpGained;
                 
@@ -1230,7 +1190,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     newRealmXp -= req;
                     newRealmRank++;
                     req = calculateRealmXpRequired(newRealmRank + 1);
-                    // EVENT TRIGGER: Realm Level Up (Wait for full calc, technically happens in loop but we emit once per tick)
                 }
                 
                 if (newRealmRank > nextState.realm.realmRank) {
@@ -1243,7 +1202,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     realmExperience: newRealmXp
                 };
 
-                // Handle Repeats
                 const ongoingRuns: ActiveRun[] = [];
                 prev.activeRuns.forEach(r => {
                     if (finishedRuns.find(fr => fr.id === r.id)) {
@@ -1257,11 +1215,9 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                                      if (adv) adventurerState[id] = JSON.parse(JSON.stringify(adv));
                                  });
                                  
-                                 // Recalculate duration (including mechanics like Resource Surge which shorten it)
                                  const mech = applyDungeonMechanic(dungeon.mechanicId, dungeon.tier, nextState.realm.realmRank);
                                  const baseDuration = dungeon.durationSeconds * 1000 * mech.durationMult;
                                  
-                                 // Apply Mastery Duration Reductions (Logistics)
                                  const mastery = calculateMasteryBonus(nextState);
                                  let masteryDurationFactor = 1.0;
                                  if (dungeon.type === ContractType.DUNGEON) masteryDurationFactor = 1 - mastery.combat.durationReduction;
@@ -1296,7 +1252,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 nextState.activeRuns = ongoingRuns;
             }
 
-            // Append events if any generated in this tick
             if (newRewardEvents.length > 0) {
                 hasChanges = true;
                 nextState.rewardEventQueue = [...prev.rewardEventQueue, ...newRewardEvents];

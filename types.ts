@@ -42,6 +42,37 @@ export interface Skill {
   unlockLevel: number;
 }
 
+// --- VISUAL IDENTITY SYSTEM ---
+
+export type VisualEventType = 'DAMAGE' | 'HEAL' | 'GOLD' | 'XP' | 'CRIT' | 'LEVEL_UP' | 'DROP';
+
+export interface FeedbackEvent {
+    id: string;
+    type: VisualEventType;
+    value?: string | number;
+    position?: { x: number; y: number }; // Percentage 0-100
+    intensity: 'MINOR' | 'MAJOR' | 'EPIC';
+    color?: string;
+    icon?: string;
+}
+
+export interface RarityVisualDefinition {
+    borderColor: string;
+    bgColor: string;
+    textColor: string;
+    glowIntensity: string; // CSS box-shadow value
+    animationClass?: string;
+    particleColor: string;
+}
+
+export interface DungeonVisualDefinition {
+    themeId: string;
+    gradient: string;
+    overlayColor: string;
+    particleType: 'DUST' | 'EMBER' | 'SPORE' | 'VOID' | 'BUBBLE';
+    accentColor: string;
+}
+
 // --- SPECIALIZATION SYSTEM ---
 
 export type SpecializationType = 'COMBAT' | 'GATHERING' | 'FISHING' | 'HYBRID';
@@ -362,6 +393,7 @@ export interface Dungeon {
   lootTable?: string[]; 
   unlockReq?: UnlockRequirements;
   mechanicId?: DungeonMechanicId; // NEW: Unique Identity
+  visualTag?: string; // e.g., "CRYPT", "FOREST"
 }
 
 export interface RunSnapshot {

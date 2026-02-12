@@ -1,10 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGame } from '../services/GameContext';
-import { DUNGEONS, ENEMIES, MATERIALS, REALM_MODIFIERS } from '../constants';
-import { calculateAdventurerPower, calculateConservativePower, calculateDungeonDuration, calculatePartyDps, formatNumber, getRealmBonuses, calculateEffectiveDungeonStats, getEarlyGameBoost } from '../utils/gameMath';
-import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Lock, AlertOctagon, CheckSquare, Square as UncheckedSquare, Rocket } from 'lucide-react';
-import { ContractType, AdventurerRole } from '../types';
+import { DUNGEONS, ENEMIES, MATERIALS, REALM_MODIFIERS, CONSUMABLES } from '../constants';
+import { calculateAdventurerPower, calculateDungeonDuration, calculatePartyDps, formatNumber, calculateEffectiveDungeonStats, getEarlyGameBoost, applyDungeonMechanic } from '../utils/gameMath';
+import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Lock, AlertOctagon, CheckSquare, Square as UncheckedSquare, Rocket, Zap, Ghost, Shield, Crosshair, Box, FlaskConical } from 'lucide-react';
+import { ContractType, AdventurerRole, DungeonMechanicId, ActiveConsumable } from '../types';
 import { DungeonProgressBar } from './DungeonProgressBar';
 
 export const DungeonList: React.FC = () => {
@@ -72,6 +72,62 @@ export const DungeonList: React.FC = () => {
       }
   };
 
+  // Helper to render mechanic visual
+  const renderMechanicBadge = (id: DungeonMechanicId | undefined) => {
+      if (!id || id === 'NONE') return null;
+
+      let icon = <Activity size={12} />;
+      let color = "text-slate-400 border-slate-500/30 bg-slate-900/50";
+      let label: string = id;
+      let details: string[] = [];
+
+      switch (id) {
+          case 'SWARM':
+              icon = <Zap size={12} />;
+              color = "text-lime-400 border-lime-500/30 bg-lime-900/20";
+              label = "SWARM TACTICS";
+              details = ["Enemy HP -50%", "Loot Volume +++", "XP/Gold per kill reduced"];
+              break;
+          case 'PACK_TACTICS':
+              icon = <Users size={12} />;
+              color = "text-orange-400 border-orange-500/30 bg-orange-900/20";
+              label = "PACK TACTICS";
+              details = ["Power Req +30%", "Gold Yield +50%"];
+              break;
+          case 'UNDEAD_RESILIENCE':
+              icon = <Ghost size={12} />;
+              color = "text-purple-400 border-purple-500/30 bg-purple-900/20";
+              label = "UNDEAD RESILIENCE";
+              details = ["Enemy HP +50%", "XP Yield +100%"];
+              break;
+          case 'RESOURCE_SURGE':
+              icon = <Rocket size={12} />;
+              color = "text-cyan-400 border-cyan-500/30 bg-cyan-900/20";
+              label = "RESOURCE SURGE";
+              details = ["Duration -20%", "Yield/Hour Increased"];
+              break;
+          case 'ELITE_HUNT':
+              icon = <Crosshair size={12} />;
+              color = "text-red-400 border-red-500/30 bg-red-900/20";
+              label = "ELITE HUNT";
+              details = ["High Power Req", "Loot Rolls +2", "XP/Gold +50%"];
+              break;
+      }
+
+      return (
+          <div className={`mt-2 p-2 rounded border ${color} text-xs`}>
+              <div className="flex items-center gap-2 font-bold mb-1">
+                  {icon} {label}
+              </div>
+              <div className="flex flex-wrap gap-2 opacity-80 text-[10px]">
+                  {details.map((d, i) => (
+                      <span key={i} className="bg-black/20 px-1.5 py-0.5 rounded">{d}</span>
+                  ))}
+              </div>
+          </div>
+      );
+  };
+
   return (
     <div className="space-y-6">
       
@@ -112,14 +168,28 @@ export const DungeonList: React.FC = () => {
           )}
       </div>
 
+      {/* ACTIVE POTIONS BAR */}
+      {state.activeConsumables.length > 0 && (
+          <div className="flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-2">
+              {state.activeConsumables.map(active => (
+                  <PotionBadge key={active.id} active={active} />
+              ))}
+          </div>
+      )}
+
       <div className="grid gap-4">
         {filteredDungeons.map(dungeon => {
           // Get ALL active runs for this dungeon
           const dungeonRuns = state.activeRuns.filter(r => r.dungeonId === dungeon.id);
           const isConfiguring = configuringDungeon === dungeon.id;
-          const duration = calculateDungeonDuration(dungeon.durationSeconds, state);
-          const enemy = ENEMIES[dungeon.enemyId];
           
+          // MECHANIC LOGIC
+          const mechanic = applyDungeonMechanic(dungeon.mechanicId, dungeon.tier, state.realm.realmRank);
+          
+          const baseDurationMs = dungeon.durationSeconds * 1000 * mechanic.durationMult; // Apply mechanic duration
+          const duration = calculateDungeonDuration(baseDurationMs, state); // Apply player bonuses
+          
+          const enemy = ENEMIES[dungeon.enemyId];
           const isUnlocked = state.unlockedDungeons.includes(dungeon.id);
 
           // Stats Calculation (for setup)
@@ -136,7 +206,9 @@ export const DungeonList: React.FC = () => {
           const effectivePowerReq = realmStats.recommendedPower;
 
           // Estimate Kills / Yield
-          let estimatedKills = Math.floor((currentPartyDps * duration) / enemy.hp);
+          const effectiveEnemyHp = enemy.hp * mechanic.enemyHpMult; // Apply Mechanic HP mod
+          let estimatedKills = Math.floor((currentPartyDps * duration) / effectiveEnemyHp);
+          
           if (!isCombat) {
               // For gathering, pretend 1 cycle per 2 "kills" worth of DPS to normalize
               estimatedKills = Math.max(1, Math.floor(estimatedKills / 2));
@@ -152,9 +224,9 @@ export const DungeonList: React.FC = () => {
           let avgGold = (enemy.goldMin + enemy.goldMax) / 2;
           let avgXp = (enemy.xpMin + enemy.xpMax) / 2;
           
-          // Apply Realm Multiplier to Estimate
-          avgGold *= realmStats.lootMultiplier;
-          avgXp *= realmStats.lootMultiplier;
+          // Apply Modifiers
+          avgGold *= realmStats.lootMultiplier * mechanic.goldYieldMult;
+          avgXp *= realmStats.lootMultiplier * mechanic.xpYieldMult;
 
           // APPLY BOOST TO ESTIMATE
           if (boost.active) {
@@ -222,9 +294,9 @@ export const DungeonList: React.FC = () => {
                             <p className="text-slate-400 text-sm">{dungeon.description}</p>
                             
                             <div className="flex flex-wrap gap-4 mt-2 text-xs text-slate-500">
-                                <span className="flex items-center gap-1"><Timer size={12}/> {duration.toFixed(0)}s</span>
+                                <span className="flex items-center gap-1"><Timer size={12}/> {(duration / 1000).toFixed(0)}s</span>
                                 {isCombat ? (
-                                    <span className="flex items-center gap-1 text-red-300"><Skull size={12}/> {enemy.name} ({formatNumber(enemy.hp)} HP)</span>
+                                    <span className="flex items-center gap-1 text-red-300"><Skull size={12}/> {enemy.name} ({formatNumber(effectiveEnemyHp)} HP)</span>
                                 ) : (
                                     <span className="flex items-center gap-1 text-slate-400"><AlertTriangle size={12}/> Difficulty: {effectivePowerReq}</span>
                                 )}
@@ -234,8 +306,11 @@ export const DungeonList: React.FC = () => {
                                 </span>
                             </div>
                             
+                            {/* MECHANIC BADGE */}
+                            {renderMechanicBadge(dungeon.mechanicId)}
+
                             {/* Reward Info */}
-                            <div className="flex gap-3 mt-1 text-[10px] text-slate-600">
+                            <div className="flex gap-3 mt-2 text-[10px] text-slate-600 border-t border-slate-700/30 pt-1">
                                 <span>Base Rewards:</span>
                                 {isCombat ? (
                                     <>
@@ -284,7 +359,7 @@ export const DungeonList: React.FC = () => {
                                    
                                    // Real-time projected kills for this run (visual only)
                                    const runDps = calculatePartyDps(run.adventurerIds, state);
-                                   let runEstKills = Math.floor((runDps * (run.duration/1000)) / enemy.hp);
+                                   let runEstKills = Math.floor((runDps * (run.duration/1000)) / effectiveEnemyHp);
                                    if(!isCombat) runEstKills = Math.max(1, Math.floor(runEstKills/2));
 
                                    return (
@@ -309,7 +384,7 @@ export const DungeonList: React.FC = () => {
                                                                <div className={`w-1.5 h-1.5 rounded-full ${getRoleColor(a.role)}`}></div>
                                                                <span className="font-bold text-slate-200">{a.name}</span>
                                                                <span className="text-slate-500 text-[10px] sm:text-xs">
-                                                                   (Lvl {a.level}, {formatNumber(calculateConservativePower(a, state))} Pwr, {a.role})
+                                                                   (Lvl {a.level}, {formatNumber(calculateAdventurerPower(a, state))} Pwr, {a.role})
                                                                </span>
                                                            </div>
                                                        ))}
@@ -606,4 +681,33 @@ export const DungeonList: React.FC = () => {
       </div>
     </div>
   );
+};
+
+// Independent component to manage its own refresh rate for smooth countdown
+const PotionBadge: React.FC<{ active: ActiveConsumable }> = ({ active }) => {
+    const [timeLeft, setTimeLeft] = useState(Math.max(0, active.endTime - Date.now()));
+    
+    useEffect(() => {
+        const timer = setInterval(() => {
+            const next = Math.max(0, active.endTime - Date.now());
+            setTimeLeft(next);
+        }, 1000); // 1-second precision
+        return () => clearInterval(timer);
+    }, [active.endTime]);
+
+    if (timeLeft <= 0) return null;
+
+    const minutes = Math.floor(timeLeft / 60000);
+    const seconds = Math.floor((timeLeft % 60000) / 1000);
+    const def = CONSUMABLES.find(c => c.id === active.defId);
+
+    return (
+        <div className="bg-indigo-900/20 border border-indigo-500/30 px-3 py-1.5 rounded-full flex items-center gap-2 text-xs shadow-sm animate-in fade-in">
+            <FlaskConical size={12} className="text-indigo-400" />
+            <span className="font-bold text-indigo-200">{def?.name}</span>
+            <span className="font-mono text-indigo-400/80 text-[10px] w-8 text-right tabular-nums">
+                {minutes}:{seconds.toString().padStart(2, '0')}
+            </span>
+        </div>
+    );
 };

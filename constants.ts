@@ -1,6 +1,7 @@
 
-import { Dungeon, Rarity, Upgrade, AdventurerRole, Skill, Enemy, WeaponType, PrestigeUpgrade, ContractType, Material, AdventurerTrait, SkillNode, SkillTemplate, Trait, RealmModifier, ItemSet, UniqueEffect, ConsumableDef, CraftingRecipe, ItemType } from './types';
+import { Dungeon, Rarity, Upgrade, AdventurerRole, Skill, Enemy, WeaponType, PrestigeUpgrade, ContractType, Material, AdventurerTrait, SkillNode, SkillTemplate, Trait, RealmModifier, ItemSet, UniqueEffect, ConsumableDef, CraftingRecipe, ItemType, RarityVisualDefinition, DungeonVisualDefinition } from './types';
 
+// ... (Keep all existing constants up to RARITY_BG_COLORS, we will replace/augment them) ...
 export const INITIAL_GOLD = 0;
 export const INVENTORY_SIZE = 50;
 export const LOOT_FILTER_UNLOCK_COST = 2500;
@@ -22,7 +23,7 @@ export const EARLY_GAME_CONFIG = {
 
 export const REALM_CONFIG = {
     // Rank (Soft Progression)
-    baseXp: 2500, 
+    baseXp: 500, // Reduced from 2500 to make Rank 1 accessible quickly
     scalingFactor: 2.2, 
     
     // Reward Scaling (Based on RANK)
@@ -89,17 +90,17 @@ export const REALM_MODIFIERS: RealmModifier[] = [
         id: 'elite_enemies',
         name: 'Elite Enemies',
         description: 'Enemies are 50% stronger, but drop 50% more gold.',
-        unlockRank: 2,
+        unlockRank: 1, // Reduced from 2
         enemyPowerMult: 1.5,
         lootYieldMult: 1.5,
         rarityShiftBonus: 0,
-        unlockCost: [ { resourceId: 'iron_ore', amount: 50 } ]
+        unlockCost: [ { resourceId: 'iron_ore', amount: 25 } ]
     },
     {
         id: 'treasure_hoard',
         name: 'Treasure Hoard',
         description: 'Enemies are 2x stronger. High chance for better loot.',
-        unlockRank: 5,
+        unlockRank: 4, // Reduced from 5
         enemyPowerMult: 2.0,
         lootYieldMult: 1.2,
         rarityShiftBonus: 5.0,
@@ -109,7 +110,7 @@ export const REALM_MODIFIERS: RealmModifier[] = [
         id: 'corrupted_land',
         name: 'Corrupted Land',
         description: 'Extremely dangerous (3x Power). Massive rewards.',
-        unlockRank: 10,
+        unlockRank: 8, // Reduced from 10
         enemyPowerMult: 3.0,
         lootYieldMult: 3.0,
         rarityShiftBonus: 10.0,
@@ -252,6 +253,94 @@ export const RARITY_BG_COLORS: Record<Rarity, string> = {
   [Rarity.RARE]: 'bg-blue-900/30',
   [Rarity.EPIC]: 'bg-purple-900/30',
   [Rarity.LEGENDARY]: 'bg-orange-900/30',
+};
+
+// --- VISUAL IDENTITY CONSTANTS ---
+
+export const RARITY_VISUALS: Record<Rarity, RarityVisualDefinition> = {
+    [Rarity.COMMON]: {
+        borderColor: 'border-slate-700',
+        bgColor: 'bg-slate-800',
+        textColor: 'text-slate-400',
+        glowIntensity: 'none',
+        particleColor: '#94a3b8'
+    },
+    [Rarity.UNCOMMON]: {
+        borderColor: 'border-green-600',
+        bgColor: 'bg-green-950',
+        textColor: 'text-green-400',
+        glowIntensity: '0 0 10px rgba(74, 222, 128, 0.2)',
+        particleColor: '#4ade80'
+    },
+    [Rarity.RARE]: {
+        borderColor: 'border-blue-600',
+        bgColor: 'bg-blue-950',
+        textColor: 'text-blue-400',
+        glowIntensity: '0 0 15px rgba(96, 165, 250, 0.4)',
+        animationClass: 'animate-pulse',
+        particleColor: '#60a5fa'
+    },
+    [Rarity.EPIC]: {
+        borderColor: 'border-purple-600',
+        bgColor: 'bg-purple-950',
+        textColor: 'text-purple-400',
+        glowIntensity: '0 0 20px rgba(192, 132, 252, 0.6)',
+        animationClass: 'animate-pulse',
+        particleColor: '#c084fc'
+    },
+    [Rarity.LEGENDARY]: {
+        borderColor: 'border-orange-500',
+        bgColor: 'bg-orange-950',
+        textColor: 'text-orange-400',
+        glowIntensity: '0 0 30px rgba(251, 146, 60, 0.8)',
+        animationClass: 'animate-bounce',
+        particleColor: '#fb923c'
+    }
+};
+
+export const DUNGEON_THEMES: Record<string, DungeonVisualDefinition> = {
+    'CRYPT': {
+        themeId: 'CRYPT',
+        gradient: 'from-slate-900 via-purple-950 to-slate-900',
+        overlayColor: 'bg-purple-900/10',
+        particleType: 'EMBER', // ghostly embers
+        accentColor: 'text-purple-400'
+    },
+    'FOREST': {
+        themeId: 'FOREST',
+        gradient: 'from-slate-900 via-emerald-950 to-slate-900',
+        overlayColor: 'bg-emerald-900/10',
+        particleType: 'SPORE',
+        accentColor: 'text-emerald-400'
+    },
+    'CAVE': {
+        themeId: 'CAVE',
+        gradient: 'from-slate-900 via-stone-900 to-black',
+        overlayColor: 'bg-black/20',
+        particleType: 'DUST',
+        accentColor: 'text-stone-400'
+    },
+    'VOLCANO': {
+        themeId: 'VOLCANO',
+        gradient: 'from-slate-900 via-red-950 to-orange-950',
+        overlayColor: 'bg-red-900/10',
+        particleType: 'EMBER',
+        accentColor: 'text-red-400'
+    },
+    'VOID': {
+        themeId: 'VOID',
+        gradient: 'from-black via-indigo-950 to-black',
+        overlayColor: 'bg-indigo-900/20',
+        particleType: 'VOID',
+        accentColor: 'text-indigo-400'
+    },
+    'WATER': {
+        themeId: 'WATER',
+        gradient: 'from-slate-900 via-cyan-950 to-blue-950',
+        overlayColor: 'bg-cyan-900/10',
+        particleType: 'BUBBLE',
+        accentColor: 'text-cyan-400'
+    }
 };
 
 export const RARITY_ORDER: Record<Rarity, number> = {
@@ -555,6 +644,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.20,
     recommendedPower: 25,
     mechanicId: 'SWARM', // Unique Mechanic
+    visualTag: 'CAVE',
     unlockReq: {} // Always unlocked
   },
   {
@@ -569,6 +659,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.25,
     recommendedPower: 100,
     mechanicId: 'PACK_TACTICS', // Unique Mechanic
+    visualTag: 'FOREST',
     unlockReq: {
         minPower: 80,
         previousDungeonId: 'rat_cellar',
@@ -587,6 +678,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.30,
     recommendedPower: 300,
     mechanicId: 'PACK_TACTICS', // Reuse mechanic but stronger due to scaling
+    visualTag: 'CAVE',
     unlockReq: {
         minPower: 250,
         previousDungeonId: 'goblin_camp',
@@ -605,6 +697,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.35,
     recommendedPower: 900,
     mechanicId: 'UNDEAD_RESILIENCE', // Unique Mechanic
+    visualTag: 'CRYPT',
     unlockReq: {
         minPower: 800,
         minGuildLevel: 3
@@ -622,6 +715,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.40,
     recommendedPower: 2500,
     mechanicId: 'ELITE_HUNT', // Unique Mechanic
+    visualTag: 'VOLCANO',
     unlockReq: {
         minPower: 2000,
         minAscension: 1
@@ -638,6 +732,7 @@ export const DUNGEONS: Dungeon[] = [
     enemyId: 'void_sentinel',
     dropChance: 0.50,
     recommendedPower: 6000,
+    visualTag: 'VOID',
     unlockReq: {
         minPower: 5000,
         minAscension: 3
@@ -658,6 +753,7 @@ export const DUNGEONS: Dungeon[] = [
     recommendedPower: 30,
     lootTable: ['hardwood', 'mystic_herb'],
     mechanicId: 'RESOURCE_SURGE', // Unique Mechanic
+    visualTag: 'FOREST',
     unlockReq: {}
   },
   {
@@ -672,6 +768,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.70,
     recommendedPower: 200,
     lootTable: ['iron_ore', 'ancient_relic'],
+    visualTag: 'CAVE',
     unlockReq: { minPower: 150 }
   },
 
@@ -688,6 +785,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.60, // Lower chance but potentially higher value
     recommendedPower: 50,
     lootTable: ['raw_fish', 'prism_pearl'],
+    visualTag: 'WATER',
     unlockReq: { minPower: 40 }
   },
   {
@@ -702,6 +800,7 @@ export const DUNGEONS: Dungeon[] = [
     dropChance: 0.50,
     recommendedPower: 1000,
     lootTable: ['raw_fish', 'prism_pearl', 'ancient_relic'],
+    visualTag: 'WATER',
     unlockReq: { minPower: 800 }
   }
 ];
@@ -717,7 +816,8 @@ export const UPGRADES: Upgrade[] = [
     level: 0,
     maxLevel: 50,
     effect: (lvl) => lvl * 2,
-    // No resource cost for early levels
+    // Add Iron Ore cost scaling (starting Lvl 3)
+    resourceCost: (lvl) => lvl >= 2 ? [{ resourceId: 'iron_ore', amount: Math.floor(lvl * 1.5) + 1 }] : []
   },
   {
     id: 'marketplace_connections',
@@ -729,7 +829,8 @@ export const UPGRADES: Upgrade[] = [
     level: 0,
     maxLevel: 20,
     effect: (lvl) => lvl * 0.1, 
-    resourceCost: (lvl) => lvl >= 5 ? [{ resourceId: 'raw_fish', amount: lvl }] : []
+    // Fish cost starts immediately
+    resourceCost: (lvl) => [{ resourceId: 'raw_fish', amount: Math.max(1, lvl * 2) }]
   },
   {
     id: 'logistics_network',
@@ -741,7 +842,8 @@ export const UPGRADES: Upgrade[] = [
     level: 0,
     maxLevel: 10,
     effect: (lvl) => lvl * 0.05, 
-    resourceCost: (lvl) => lvl >= 1 ? [{ resourceId: 'hardwood', amount: lvl * 10 }] : []
+    // Hardwood cost starts immediately
+    resourceCost: (lvl) => [{ resourceId: 'hardwood', amount: (lvl + 1) * 10 }]
   },
   {
     id: 'loot_logic',
@@ -753,7 +855,8 @@ export const UPGRADES: Upgrade[] = [
     level: 0,
     maxLevel: 20,
     effect: (lvl) => lvl * 0.02,
-    resourceCost: (lvl) => lvl >= 3 ? [{ resourceId: 'mystic_herb', amount: lvl * 2 }] : []
+    // Herb cost starts immediately
+    resourceCost: (lvl) => [{ resourceId: 'mystic_herb', amount: Math.max(1, lvl * 2) }]
   },
 ];
 

@@ -83,7 +83,7 @@ export const GuildPanel: React.FC = () => {
                             {/* Cost Display */}
                             {!isMax && (
                                 <div className="flex flex-col gap-1 text-xs bg-black/20 p-2 rounded">
-                                    <div className={`flex justify-between gap-4 font-mono ${hasGold ? 'text-yellow-500' : 'text-red-400'}`}>
+                                    <div className={`flex justify-between gap-4 font-mono ${hasGold ? 'text-yellow-500' : 'text-slate-500'}`}>
                                         <span>Gold:</span>
                                         <span>{formatNumber(goldCost)}g</span>
                                     </div>
@@ -92,7 +92,7 @@ export const GuildPanel: React.FC = () => {
                                         const playerAmt = state.materials[cost.resourceId] || 0;
                                         const hasMat = playerAmt >= cost.amount;
                                         return (
-                                            <div key={idx} className={`flex justify-between gap-4 font-mono ${hasMat ? RARITY_COLORS[mat.rarity] : 'text-red-400'}`}>
+                                            <div key={idx} className={`flex justify-between gap-4 font-mono ${hasMat ? RARITY_COLORS[mat.rarity] : 'text-slate-500'}`}>
                                                 <span>{mat.name}:</span>
                                                 <span>{playerAmt}/{cost.amount}</span>
                                             </div>

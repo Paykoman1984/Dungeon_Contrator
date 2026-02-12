@@ -2,9 +2,9 @@
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
 import { Item, ItemType, Rarity, Adventurer } from '../types';
-import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual, calculateItemRating, calculateConservativePower, getActiveModifiers } from '../utils/gameMath';
-import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight, Lock, AlertTriangle } from 'lucide-react';
-import { RARITY_COLORS, MAX_STATS_BY_RARITY, ADVENTURER_RARITY_MULTIPLIERS, STAT_TIER_COLORS } from '../constants';
+import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calculateRunSnapshot, areItemsEqual, calculateItemRating, calculateConservativePower, getActiveModifiers, checkResourceCost } from '../utils/gameMath';
+import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight, Lock, AlertTriangle, Box } from 'lucide-react';
+import { RARITY_COLORS, MAX_STATS_BY_RARITY, ADVENTURER_RARITY_MULTIPLIERS, STAT_TIER_COLORS, MATERIALS } from '../constants';
 import { ItemIcon } from './ItemIcon';
 
 interface ItemDetailsModalProps {
@@ -19,7 +19,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
 
     if (!item) return null;
 
-    // Determine State: Is it Equipped? If so, by whom?
     let holder: Adventurer | null = null;
     let slotType: ItemType | null = null;
     let isEquipped = false;
@@ -31,19 +30,15 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
     }
     if (holder) isEquipped = true;
 
-    // Check if holder is busy (in run)
     const run = holder ? state.activeRuns.find(r => r.adventurerIds.includes(holder!.id)) : undefined;
     const isBusy = !!run;
     
-    // Check if pending changes (Slot specific comparison)
     let isPending = false;
     if (holder && isBusy && run && run.adventurerState && slotType) {
         const snapshotAdv = run.adventurerState[holder.id];
-        // Only proceed if snapshot exists (migrated runs)
         if (snapshotAdv) {
             const snapshotItem = snapshotAdv.slots[slotType];
             
-            // Find live item from state because 'item' prop might be stale if we just modified it
             let liveItem = state.inventory.find(i => i.id === item.id);
             if (!liveItem && holder && slotType) {
                 const currentHolder = state.adventurers.find(a => a.id === holder!.id);
@@ -53,7 +48,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
             }
             const checkItem = liveItem || item;
 
-            // Check if slot was modified directly (touched) or if content differs
             const isModified = run.modifiedSlots?.[holder.id]?.includes(slotType);
             if (isModified || !areItemsEqual(checkItem, snapshotItem)) {
                 isPending = true;
@@ -61,32 +55,47 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
         }
     }
 
-    // Find live item from state (to get updates during modal lifespan)
     let liveItem: Item | undefined = state.inventory.find(i => i.id === item.id);
     if (!liveItem && holder && slotType) {
-        // Re-fetch holder from state in case of updates
         const currentHolder = state.adventurers.find(a => a.id === holder!.id);
         if (currentHolder) {
             liveItem = currentHolder.slots[slotType];
         }
     }
-    // Fallback
     const currentItem = liveItem || item;
 
-    // Use centralized cost calculation
     const costs = {
         enchant: calculateItemUpgradeCost(currentItem, 'ENCHANT'),
         reroll: calculateItemUpgradeCost(currentItem, 'REROLL')
     };
     
-    // Calculate Score
     const rating = calculateItemRating(currentItem);
+
+    const renderCostLabel = (costObj: { gold: number, resources: { resourceId: string, amount: number }[] }) => {
+        return (
+            <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+                <span className={state.gold >= costObj.gold ? 'text-white' : 'text-slate-500'}>
+                    {formatNumber(costObj.gold)}g
+                </span>
+                {costObj.resources.length > 0 && costObj.resources.map((res, i) => {
+                    const mat = MATERIALS[res.resourceId];
+                    const owned = state.materials[res.resourceId] || 0;
+                    const hasEnough = owned >= res.amount;
+                    return (
+                        <span key={i} className={`flex items-center gap-1 bg-black/40 px-1 rounded ${hasEnough ? 'text-slate-300' : 'text-slate-600 border border-slate-800 opacity-50'}`}>
+                            <Box size={8} /> 
+                            {res.amount} {mat ? mat.name.split(' ')[0] : res.resourceId}
+                        </span>
+                    );
+                })}
+            </div>
+        );
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
                 
-                {/* Header */}
                 <div className="p-4 border-b border-slate-800 flex justify-between items-start bg-slate-950/50">
                     <div className="flex gap-4">
                         <div className={`w-16 h-16 rounded-lg border-2 flex items-center justify-center bg-slate-900 shadow-inner ${RARITY_COLORS[currentItem.rarity].replace('text-', 'border-')}`}>
@@ -100,7 +109,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                 {currentItem.subtype && currentItem.subtype !== 'None' && <span>({currentItem.subtype})</span>}
                             </div>
                             
-                            {/* Class Restriction */}
                             {currentItem.classRestriction && (
                                 <div className="flex gap-1 mt-2">
                                     {currentItem.classRestriction.map(r => (
@@ -113,7 +121,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                         </div>
                     </div>
                     
-                    {/* Right Side: Score & Close */}
                     <div className="flex items-start gap-4">
                         <div className="text-right">
                             <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Item Power</div>
@@ -125,7 +132,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                     </div>
                 </div>
 
-                {/* Tabs */}
                 <div className="flex border-b border-slate-800 bg-slate-900">
                     <button 
                         onClick={() => setTab('MANAGE')}
@@ -141,16 +147,13 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                     </button>
                 </div>
 
-                {/* Content Area */}
                 <div className="p-6 overflow-y-auto flex-1 bg-slate-900">
                     
-                    {/* STATS DISPLAY (Always Visible) */}
                     <div className="grid grid-cols-2 gap-3 mb-6">
                          {currentItem.stats.map((stat, idx) => {
                              const tier = stat.tier || 7;
                              return (
                                  <div key={idx} className="bg-slate-800 p-3 rounded border border-slate-700/50 flex flex-col items-center justify-center relative overflow-hidden group">
-                                     {/* Tier Badge */}
                                      <div className={`absolute top-0 right-0 px-1.5 py-0.5 text-[9px] font-bold rounded-bl bg-black/40 ${STAT_TIER_COLORS[tier]}`}>
                                          T{tier}
                                      </div>
@@ -166,7 +169,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                     {tab === 'MANAGE' && (
                         <div className="space-y-6 animate-in fade-in duration-200">
                             
-                            {/* Current Status */}
                             <div className="bg-slate-950/50 border border-slate-800 rounded p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className={`p-2 rounded-full ${isEquipped ? 'bg-indigo-900/30 text-indigo-400' : 'bg-slate-800 text-slate-500'}`}>
@@ -195,7 +197,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                 )}
                             </div>
 
-                            {/* Actions */}
                             {isEquipped ? (
                                 <button
                                     onClick={() => {
@@ -211,7 +212,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                 </button>
                             ) : (
                                 <div className="space-y-4">
-                                    {/* Equip List */}
                                     <div>
                                         <h4 className="text-sm font-bold text-slate-400 mb-3 uppercase tracking-wider">Assign to Contractor</h4>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
@@ -223,7 +223,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                 const isWeaponMaster = activeModifiers.includes('WEAPON_MASTER');
                                                 const isSlotDisabled = currentItem.type === ItemType.TRINKET && isWeaponMaster;
 
-                                                // Check pending logic for list items if they are busy
                                                 let advPending = false;
                                                 if(advBusy) {
                                                     const run = state.activeRuns.find(r => r.adventurerIds.includes(adv.id));
@@ -268,7 +267,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                             </span>
                                                         </div>
 
-                                                        {/* Comparison Section */}
                                                         <div className="w-full bg-black/20 rounded p-2 text-xs">
                                                             {currentEquipped ? (
                                                                 <>
@@ -292,7 +290,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                             )}
                                                         </div>
                                                         
-                                                        {/* Status Messages */}
                                                         <div className="flex gap-2 mt-2 justify-end">
                                                             {isSlotDisabled && <span className="text-[10px] text-red-500 font-bold uppercase">Locked (Weapon Master)</span>}
                                                             {!compatible && <span className="text-[10px] text-red-500 font-bold uppercase">{adv.role} Only</span>}
@@ -310,7 +307,6 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                         </div>
                                     </div>
 
-                                    {/* Salvage */}
                                     {isConfirmingSalvage ? (
                                         <div className="pt-4 border-t border-slate-800 animate-in fade-in slide-in-from-bottom-2">
                                             <div className="flex items-center justify-center gap-2 text-sm font-bold text-red-400 mb-2">
@@ -361,11 +357,10 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                  </div>
                              )}
 
-                             {/* Existing Stats Reroll */}
                              <div className="space-y-2">
                                  {currentItem.stats.map((stat, idx) => {
                                      const tier = stat.tier || 7;
-                                     const canAfford = state.gold >= costs.reroll;
+                                     const canAfford = state.gold >= costs.reroll.gold && checkResourceCost(state, costs.reroll.resources);
                                      return (
                                          <div key={idx} className="bg-slate-950 p-3 rounded border border-slate-800 flex justify-between items-center">
                                              <div>
@@ -379,22 +374,22 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                 onClick={() => rerollStat(currentItem.id, idx)}
                                                 disabled={!canAfford}
                                                 className={`
-                                                    px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 border transition-colors
+                                                    px-3 py-1.5 rounded text-xs font-bold flex flex-col items-end border transition-colors min-w-[100px]
                                                     ${!canAfford
                                                         ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
                                                         : 'bg-indigo-900/30 text-indigo-300 border-indigo-500/30 hover:bg-indigo-600 hover:text-white'
                                                     }
                                                 `}
                                              >
-                                                 <RefreshCw size={12} /> {formatNumber(costs.reroll)}g
+                                                 <span className="flex items-center gap-1"><RefreshCw size={10} /> Reforge</span>
+                                                 {renderCostLabel(costs.reroll)}
                                              </button>
                                          </div>
                                      )
                                  })}
 
-                                 {/* Enchant Slots */}
                                  {Array.from({ length: MAX_STATS_BY_RARITY[currentItem.rarity] - currentItem.stats.length }).map((_, idx) => {
-                                      const canAfford = state.gold >= costs.enchant;
+                                      const canAfford = state.gold >= costs.enchant.gold && checkResourceCost(state, costs.enchant.resources);
                                       return (
                                           <div key={`empty-${idx}`} className="bg-slate-900/30 border border-dashed border-slate-700 p-3 rounded flex justify-between items-center">
                                               <div className="text-sm text-slate-500 italic flex items-center gap-2">
@@ -404,14 +399,15 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                                 onClick={() => enchantItem(currentItem.id)}
                                                 disabled={!canAfford}
                                                 className={`
-                                                    px-3 py-1.5 rounded text-xs font-bold flex items-center gap-2 border transition-colors
+                                                    px-3 py-1.5 rounded text-xs font-bold flex flex-col items-end border transition-colors min-w-[100px]
                                                     ${!canAfford
                                                         ? 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
                                                         : 'bg-emerald-900/30 text-emerald-300 border-emerald-500/30 hover:bg-emerald-600 hover:text-white'
                                                     }
                                                 `}
                                               >
-                                                  <PlusCircle size={12} /> {formatNumber(costs.enchant)}g
+                                                  <span className="flex items-center gap-1"><PlusCircle size={10} /> Enchant</span>
+                                                  {renderCostLabel(costs.enchant)}
                                               </button>
                                           </div>
                                       )
@@ -422,7 +418,8 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                                  <Info size={16} className="flex-shrink-0 mt-0.5 text-indigo-400" />
                                  <div>
                                      Reforging a stat completely randomizes its <strong>Value</strong> and <strong>Tier</strong> (T1-T7).
-                                     <br/>Enchanting adds a new random stat line. <span className="text-amber-400">Costs scale with Rarity & existing stats.</span>
+                                     <br/>Enchanting adds a new random stat line. 
+                                     <div className="mt-1 text-amber-400">Costs scale with Level, Potential, and Rarity. Uncommon+ items require materials.</div>
                                  </div>
                              </div>
                          </div>

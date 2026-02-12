@@ -3,17 +3,16 @@ import React from 'react';
 import { useGame } from '../services/GameContext';
 import { REALM_CONFIG, REALM_MODIFIERS, MATERIALS, RARITY_COLORS } from '../constants';
 import { calculateRealmXpRequired, getRealmBonuses, formatNumber, checkResourceCost } from '../utils/gameMath';
-import { Globe, TrendingUp, Skull, Sparkles, Lock, Unlock, Crown, AlertOctagon, ArrowUpCircle, Key } from 'lucide-react';
+import { Globe, TrendingUp, Skull, Sparkles, Lock, Unlock, Crown, AlertOctagon, ArrowUpCircle, Key, Check } from 'lucide-react';
 
 export const RealmPanel: React.FC = () => {
     const { state, toggleDungeonModifier } = useGame();
     const { realmRank, realmExperience, realmTier } = state.realm;
-    const tier = realmTier || 1; // Fallback
+    const tier = realmTier || 1; 
     
     const xpRequired = calculateRealmXpRequired(realmRank + 1);
     const progressPercent = Math.min(100, (realmExperience / xpRequired) * 100);
     
-    // Calculate global bonuses
     const bonuses = getRealmBonuses(state.realm);
 
     return (
@@ -105,122 +104,95 @@ export const RealmPanel: React.FC = () => {
                         </div>
 
                         <div className="space-y-2">
-                            <div className="flex justify-between text-sm p-3 bg-slate-950/50 rounded border border-red-900/50">
-                                <span className="text-slate-300 font-bold flex items-center gap-2">
-                                    <TrendingUp size={16} className="text-red-500" />
-                                    Global Enemy Power
-                                </span>
-                                <span className="text-red-400 font-mono font-bold text-lg">
-                                    +{(bonuses.enemyPowerMultiplier - 1) * 100}%
-                                </span>
+                            <div className="flex justify-between text-sm p-2 bg-slate-950/50 rounded border border-slate-800">
+                                <span className="text-slate-400">Enemy Power Scale</span>
+                                <span className="text-red-400 font-bold">x{bonuses.enemyPowerMultiplier.toFixed(2)}</span>
                             </div>
                         </div>
                     </div>
                 </div>
-
             </div>
 
-            {/* Mutation Registry */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-                <div className="flex items-center justify-between mb-4">
+            {/* MUTATIONS LIST */}
+            <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+                <div className="p-4 border-b border-slate-700 bg-slate-900/50">
                     <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                        <AlertOctagon size={20} className="text-teal-400" />
-                        Mutation Registry
+                        <AlertOctagon size={20} className="text-purple-400" />
+                        Realm Mutations
                     </h2>
-                    <span className="text-xs text-slate-500">Modifiers unlock based on Exploration Rank</span>
+                    <p className="text-xs text-slate-400">Unlock dangerous modifiers to boost rewards in specific dungeons.</p>
                 </div>
-
-                <div className="grid grid-cols-1 gap-3">
+                
+                <div className="divide-y divide-slate-700/50">
                     {REALM_MODIFIERS.map(mod => {
-                        const rankReached = realmRank >= mod.unlockRank;
-                        const isPurchased = state.realm.unlockedModifiers?.includes(mod.id);
-                        const isUnlocked = rankReached && (!mod.unlockCost || isPurchased);
-                        
-                        const canAffordUnlock = mod.unlockCost ? checkResourceCost(state, mod.unlockCost) : true;
+                        const isUnlocked = state.realm.unlockedModifiers?.includes(mod.id);
+                        const canUnlock = state.realm.realmRank >= mod.unlockRank;
+                        const canAfford = checkResourceCost(state, mod.unlockCost);
 
                         return (
-                            <div 
-                                key={mod.id} 
-                                className={`
-                                    relative overflow-hidden rounded-lg border p-4 transition-all
-                                    ${isUnlocked 
-                                        ? 'bg-slate-800 border-slate-700 hover:border-cyan-500/30' 
-                                        : 'bg-slate-900 border-slate-800 opacity-80'
-                                    }
-                                `}
-                            >
-                                <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
-                                    <div className="flex items-start gap-4">
-                                        <div className={`p-3 rounded-lg border ${isUnlocked ? 'bg-cyan-900/20 border-cyan-500/30 text-cyan-400' : 'bg-slate-950 border-slate-800 text-slate-600'}`}>
-                                            {isUnlocked ? <Unlock size={20} /> : <Lock size={20} />}
-                                        </div>
-                                        <div>
-                                            <h3 className={`font-bold text-lg ${isUnlocked ? 'text-white' : 'text-slate-500'}`}>
-                                                {mod.name}
-                                            </h3>
-                                            <p className="text-sm text-slate-400 mb-2">{mod.description}</p>
-                                            
-                                            <div className="flex gap-2 text-xs">
-                                                <span className="px-2 py-0.5 rounded bg-red-900/20 text-red-300 border border-red-900/30">
-                                                    Enemies x{mod.enemyPowerMult}
-                                                </span>
-                                                <span className="px-2 py-0.5 rounded bg-yellow-900/20 text-yellow-300 border border-yellow-900/30">
-                                                    Loot x{mod.lootYieldMult}
-                                                </span>
-                                                {mod.rarityShiftBonus > 0 && (
-                                                    <span className="px-2 py-0.5 rounded bg-purple-900/20 text-purple-300 border border-purple-900/30">
-                                                        Rarity +{mod.rarityShiftBonus}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Action Area */}
-                                    <div className="mt-2 sm:mt-0 flex flex-col items-end gap-2">
-                                        {!rankReached ? (
-                                            <div className="text-xs font-mono font-bold text-slate-500 bg-slate-950 px-3 py-1 rounded border border-slate-800">
-                                                Requires Rank {mod.unlockRank}
-                                            </div>
-                                        ) : !isUnlocked ? (
-                                            <button
-                                                onClick={() => toggleDungeonModifier('dummy', mod.id)} // Dungeon ID irrelevant for unlock action
-                                                disabled={!canAffordUnlock}
-                                                className={`
-                                                    flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all
-                                                    ${canAffordUnlock 
-                                                        ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-900/20' 
-                                                        : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                                    }
-                                                `}
-                                            >
-                                                <Key size={14} />
-                                                Unlock Mutation
-                                            </button>
-                                        ) : (
-                                            <div className="text-xs font-bold text-green-400 flex items-center gap-1">
-                                                <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
-                                                Unlocked
-                                            </div>
+                            <div key={mod.id} className="p-4 flex flex-col md:flex-row gap-4 md:items-center justify-between hover:bg-slate-700/20 transition-colors">
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <h3 className={`font-bold ${isUnlocked ? 'text-white' : 'text-slate-500'}`}>{mod.name}</h3>
+                                        {!isUnlocked && !canUnlock && (
+                                            <span className="text-[10px] bg-slate-950 text-slate-500 px-2 py-0.5 rounded border border-slate-800 flex items-center gap-1">
+                                                <Lock size={10} /> Rank {mod.unlockRank}
+                                            </span>
                                         )}
+                                        {!isUnlocked && canUnlock && (
+                                            <span className="text-[10px] bg-green-900/20 text-green-400 px-2 py-0.5 rounded border border-green-900/50 flex items-center gap-1">
+                                                <Unlock size={10} /> Available
+                                            </span>
+                                        )}
+                                        {isUnlocked && (
+                                            <span className="text-[10px] bg-indigo-900/20 text-indigo-400 px-2 py-0.5 rounded border border-indigo-900/50 flex items-center gap-1">
+                                                <Check size={10} /> Owned
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-slate-400">{mod.description}</p>
+                                    <div className="flex gap-3 mt-2 text-[10px]">
+                                        <span className="text-red-400">Enemy Power x{mod.enemyPowerMult}</span>
+                                        <span className="text-yellow-400">Loot Yield x{mod.lootYieldMult}</span>
+                                    </div>
+                                </div>
 
-                                        {/* Unlock Cost Display */}
-                                        {!isUnlocked && rankReached && mod.unlockCost && (
-                                            <div className="flex gap-2 text-[10px]">
-                                                {mod.unlockCost.map((cost, i) => {
+                                {!isUnlocked ? (
+                                    <div className="flex flex-col items-end gap-2">
+                                        {mod.unlockCost && (
+                                            <div className="flex gap-2">
+                                                {mod.unlockCost.map((cost, idx) => {
                                                     const mat = MATERIALS[cost.resourceId];
-                                                    const hasAmt = state.materials[cost.resourceId] || 0;
-                                                    const hasReq = hasAmt >= cost.amount;
+                                                    const owned = state.materials[cost.resourceId] || 0;
+                                                    const has = owned >= cost.amount;
                                                     return (
-                                                        <span key={i} className={`bg-black/30 px-1.5 py-0.5 rounded border ${hasReq ? 'text-slate-300 border-slate-700' : 'text-red-400 border-red-900/50'}`}>
-                                                            {mat.name}: {hasAmt}/{cost.amount}
-                                                        </span>
+                                                        <div key={idx} className={`text-xs px-2 py-1 rounded bg-slate-950 border ${has ? 'border-slate-700 text-slate-300' : 'border-slate-800 text-slate-600 opacity-60'}`}>
+                                                            {cost.amount} {mat.name}
+                                                        </div>
                                                     )
                                                 })}
                                             </div>
                                         )}
+                                        <button
+                                            onClick={() => toggleDungeonModifier('global', mod.id)} // Passing 'global' or any string as ID just to trigger the unlock logic which handles cost
+                                            disabled={!canUnlock || !canAfford}
+                                            className={`px-4 py-2 rounded font-bold text-xs flex items-center gap-2 transition-all
+                                                ${!canUnlock 
+                                                    ? 'bg-slate-800 text-slate-600 cursor-not-allowed' 
+                                                    : !canAfford
+                                                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                                                        : 'bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-900/20'
+                                                }
+                                            `}
+                                        >
+                                            <Key size={14} /> Unlock Mutation
+                                        </button>
                                     </div>
-                                </div>
+                                ) : (
+                                    <div className="text-xs text-slate-500 italic px-4">
+                                        Activate this mutation in the Contract menu.
+                                    </div>
+                                )}
                             </div>
                         );
                     })}

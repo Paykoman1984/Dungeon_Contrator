@@ -71,7 +71,7 @@ export const InventoryPanel: React.FC = () => {
               const owned = state.materials[cost.resourceId] || 0;
               const hasEnough = owned >= cost.amount;
               return (
-                  <div key={i} className={`px-2 py-1 rounded border flex items-center gap-1 ${hasEnough ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-red-900/20 border-red-500/30 text-red-300'}`}>
+                  <div key={i} className={`px-2 py-1 rounded border flex items-center gap-1 ${hasEnough ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-950 border-slate-800 text-slate-600 opacity-70'}`}>
                       <span className={hasEnough ? RARITY_COLORS[mat.rarity] : ''}>{mat.name}</span>
                       <span className="font-mono">{owned}/{cost.amount}</span>
                   </div>
@@ -349,36 +349,6 @@ export const InventoryPanel: React.FC = () => {
       {/* 3. WORKSHOP TAB */}
       {activeTab === 'WORKSHOP' && (
           <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-              {/* Active Effects Display */}
-              {state.activeConsumables.length > 0 && (
-                  <div className="mb-6 bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-xl">
-                      <h3 className="text-sm font-bold text-indigo-300 flex items-center gap-2 mb-3">
-                          <Zap size={16} /> Active Effects
-                      </h3>
-                      <div className="flex flex-wrap gap-3">
-                          {state.activeConsumables.map(active => {
-                              const def = CONSUMABLES.find(c => c.id === active.defId);
-                              if (!def) return null;
-                              const timeLeft = Math.max(0, active.endTime - Date.now());
-                              const minutes = Math.floor(timeLeft / 60000);
-                              const seconds = Math.floor((timeLeft % 60000) / 1000);
-                              
-                              return (
-                                  <div key={active.id} className="bg-indigo-950/50 px-3 py-2 rounded-lg border border-indigo-500/50 flex items-center gap-3">
-                                      <FlaskConical size={16} className="text-indigo-400" />
-                                      <div>
-                                          <div className="text-xs font-bold text-white">{def.name}</div>
-                                          <div className="text-[10px] font-mono text-indigo-300 flex items-center gap-1">
-                                              <Timer size={10} /> {minutes}:{seconds.toString().padStart(2, '0')}
-                                          </div>
-                                      </div>
-                                  </div>
-                              )
-                          })}
-                      </div>
-                  </div>
-              )}
-
               {/* Sub-Tabs */}
               <div className="flex gap-4 mb-4">
                   <button 
@@ -413,7 +383,7 @@ export const InventoryPanel: React.FC = () => {
                                       
                                       <div className="bg-slate-900/50 p-2 rounded mb-3">
                                           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Required</div>
-                                          <div className="flex items-center gap-2 text-xs font-mono text-yellow-500 mb-1">
+                                          <div className={`flex items-center gap-2 text-xs font-mono mb-1 ${state.gold >= recipe.goldCost ? 'text-yellow-500' : 'text-slate-500'}`}>
                                               <Coins size={10} /> {formatNumber(recipe.goldCost)}g
                                           </div>
                                           {renderCost(recipe.cost)}
@@ -456,7 +426,7 @@ export const InventoryPanel: React.FC = () => {
                                       
                                       <div className="bg-slate-900/50 p-2 rounded mb-3">
                                           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Required</div>
-                                          <div className="flex items-center gap-2 text-xs font-mono text-yellow-500 mb-1">
+                                          <div className={`flex items-center gap-2 text-xs font-mono mb-1 ${state.gold >= recipe.goldCost ? 'text-yellow-500' : 'text-slate-500'}`}>
                                               <Coins size={10} /> {formatNumber(recipe.goldCost)}g
                                           </div>
                                           {renderCost(recipe.cost)}

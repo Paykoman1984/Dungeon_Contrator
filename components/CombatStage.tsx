@@ -1,8 +1,10 @@
-
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useGame } from '../services/GameContext';
-import { DUNGEONS, ENEMIES, ROLE_CONFIG } from '../constants';
-import { Skull, ShieldAlert, Sparkles, Crosshair, Sword } from 'lucide-react';
+import { useVisuals } from '../services/VisualContext';
+import { DUNGEONS, ENEMIES, ROLE_CONFIG, DUNGEON_THEMES } from '../constants';
+import { Skull, ShieldAlert, Sparkles, Crosshair, Zap } from 'lucide-react';
+import { getAdventurerStats } from '../utils/gameMath';
+import { FloatingTextLayer } from './FloatingTextLayer';
 
 interface CombatStageProps {
     dungeonId: string;
@@ -11,119 +13,176 @@ interface CombatStageProps {
 
 export const CombatStage: React.FC<CombatStageProps> = ({ dungeonId, adventurerIds }) => {
     const { state } = useGame();
+    const { emitFeedback } = useVisuals();
     const dungeon = DUNGEONS.find(d => d.id === dungeonId);
     const enemy = dungeon ? ENEMIES[dungeon.enemyId] : null;
+    const theme = dungeon?.visualTag ? DUNGEON_THEMES[dungeon.visualTag] : DUNGEON_THEMES['CAVE'];
 
-    // Local state to trigger CSS animations
-    const [heroAttacking, setHeroAttacking] = useState<number | null>(null); // Index of hero attacking
-    const [enemyAttacking, setEnemyAttacking] = useState(false);
-
-    // Get actual adventurer objects
+    // Visual State
+    const [heroState, setHeroState] = useState<Record<string, 'IDLE' | 'ATTACK' | 'HIT'>>({});
+    const [enemyState, setEnemyState] = useState<'IDLE' | 'ATTACK' | 'HIT'>('IDLE');
+    
     const party = adventurerIds.map(id => state.adventurers.find(a => a.id === id)).filter(Boolean);
+    const lastAttackTime = useRef<Record<string, number>>({});
 
-    // Animation Loop
+    // Simulation Loop
     useEffect(() => {
-        // Hero Attacks
-        const heroInterval = setInterval(() => {
-            const randomHeroIndex = Math.floor(Math.random() * party.length);
-            setHeroAttacking(randomHeroIndex);
-            setTimeout(() => setHeroAttacking(null), 400); // Reset after animation
-        }, 1200); // Frequent hero attacks
+        if (!party.length || !enemy) return;
 
-        // Enemy Attacks
-        const enemyInterval = setInterval(() => {
-            setEnemyAttacking(true);
-            setTimeout(() => setEnemyAttacking(false), 500);
-        }, 3000); // Slower enemy attacks
+        const interval = setInterval(() => {
+            const now = Date.now();
 
-        return () => {
-            clearInterval(heroInterval);
-            clearInterval(enemyInterval);
-        };
-    }, [party.length]);
+            // 1. Simulate Hero Attacks
+            party.forEach(hero => {
+                if (!hero) return;
+                const stats = getAdventurerStats(hero, state);
+                
+                // Speed determines attack frequency (Visual only)
+                // Base attack every 2000ms divided by speed
+                const attackInterval = 2000 / stats.speed;
+                const last = lastAttackTime.current[hero.id] || 0;
 
-    if (!dungeon || !enemy) return null;
+                if (now - last > attackInterval) {
+                    // Trigger Attack
+                    lastAttackTime.current[hero.id] = now + (Math.random() * 500); // jitter
+                    
+                    setHeroState(prev => ({ ...prev, [hero.id]: 'ATTACK' }));
+                    setTimeout(() => setHeroState(prev => ({ ...prev, [hero.id]: 'IDLE' })), 300);
 
-    // Dynamic Backgrounds based on dungeon ID (simple gradients)
-    const getBgStyle = () => {
-        switch(dungeon.id) {
-            case 'rat_cellar': return 'from-slate-900 to-slate-800';
-            case 'goblin_camp': return 'from-emerald-950 to-slate-900';
-            case 'wolf_den': return 'from-slate-900 to-stone-900';
-            case 'skeleton_crypt': return 'from-indigo-950 to-slate-900';
-            case 'dragon_peak': return 'from-red-950 to-orange-950';
-            default: return 'from-slate-900 to-slate-800';
-        }
-    };
+                    // Trigger Hit on Enemy slightly later
+                    setTimeout(() => {
+                        setEnemyState('HIT');
+                        setTimeout(() => setEnemyState('IDLE'), 200);
+                        
+                        // Emit Damage Number
+                        const isCrit = Math.random() < stats.critChance;
+                        const dmg = Math.floor(stats.damage * (isCrit ? 1.5 : 1) * (0.8 + Math.random() * 0.4));
+                        
+                        emitFeedback({
+                            type: isCrit ? 'CRIT' : 'DAMAGE',
+                            value: dmg,
+                            intensity: isCrit ? 'MAJOR' : 'MINOR',
+                            position: { x: 75, y: 40 + Math.random() * 20 } // Target Enemy side
+                        });
+
+                    }, 200);
+                }
+            });
+
+            // 2. Simulate Enemy Attacks
+            // Simplified: Enemy attacks randomly every 2-4 seconds
+            const enemyLast = lastAttackTime.current['enemy'] || 0;
+            if (now - enemyLast > 3000) {
+                lastAttackTime.current['enemy'] = now;
+                setEnemyState('ATTACK');
+                setTimeout(() => setEnemyState('IDLE'), 400);
+
+                // Hit random hero
+                const targetIdx = Math.floor(Math.random() * party.length);
+                const target = party[targetIdx];
+                if (target) {
+                    setTimeout(() => {
+                        setHeroState(prev => ({ ...prev, [target.id]: 'HIT' }));
+                        setTimeout(() => setHeroState(prev => ({ ...prev, [target.id]: 'IDLE' })), 200);
+                        
+                        emitFeedback({
+                            type: 'DAMAGE',
+                            value: 'Hit!', // Or simulated damage
+                            intensity: 'MINOR',
+                            color: 'text-red-500',
+                            position: { x: 20 + (targetIdx * 10), y: 50 } 
+                        });
+                    }, 200);
+                }
+            }
+
+        }, 100); // Check loop
+
+        return () => clearInterval(interval);
+    }, [party, enemy, state]);
+
+    if (!dungeon || !enemy || !theme) return null;
 
     return (
-        <div className={`w-full h-32 rounded-lg mb-3 bg-gradient-to-r ${getBgStyle()} relative overflow-hidden border border-white/5 flex items-center justify-between px-8 shadow-inner`}>
+        <div className={`w-full h-40 rounded-xl mb-4 bg-gradient-to-r ${theme.gradient} relative overflow-hidden border border-white/10 flex items-center justify-between px-8 shadow-2xl group`}>
             
-            {/* Environment Particles (Static for now, could be animated clouds/dust) */}
-            <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]"></div>
+            {/* Visual Layers */}
+            <div className={`absolute inset-0 ${theme.overlayColor} mix-blend-overlay`}></div>
+            <div className="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] animate-pulse"></div>
+            
+            {/* Particles (CSS Simulated) */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <div className={`absolute w-full h-full opacity-30 ${theme.particleType === 'EMBER' ? 'bg-ember-particles' : ''}`}></div>
+            </div>
+
+            {/* Floating Text Overlay */}
+            <FloatingTextLayer />
 
             {/* --- LEFT SIDE: HEROES --- */}
             <div className="flex gap-4 z-10">
                 {party.map((hero, idx) => {
                     if (!hero) return null;
-                    const isAttacking = heroAttacking === idx;
-                    const isHit = enemyAttacking; // Simplification: When enemy attacks, all heroes "shake"
+                    const status = heroState[hero.id] || 'IDLE';
+                    
+                    let animClass = 'animate-float';
+                    if (status === 'ATTACK') animClass = 'animate-lunge-right';
+                    if (status === 'HIT') animClass = 'animate-shake-red';
 
                     return (
                         <div 
                             key={hero.id} 
-                            className={`
-                                flex flex-col items-center justify-center transition-all duration-75
-                                ${!isAttacking ? `animate-float delay-${idx * 100}` : 'animate-attack-hero'}
-                                ${isHit ? 'animate-hit' : ''}
-                            `}
+                            className={`flex flex-col items-center justify-center transition-transform duration-100 ${animClass}`}
+                            style={{ animationDelay: `${idx * 0.2}s` }}
                         >
                             {/* Hero Icon */}
                             <div className={`
-                                w-10 h-10 rounded-lg flex items-center justify-center shadow-lg border-2
-                                ${hero.role === 'Warrior' ? 'bg-red-900/80 border-red-500/50 text-red-200' : ''}
-                                ${hero.role === 'Rogue' ? 'bg-emerald-900/80 border-emerald-500/50 text-emerald-200' : ''}
-                                ${hero.role === 'Mage' ? 'bg-blue-900/80 border-blue-500/50 text-blue-200' : ''}
-                            `}
-                            >
-                                {hero.role === 'Warrior' && <ShieldAlert size={20} />}
-                                {hero.role === 'Rogue' && <Crosshair size={20} />}
-                                {hero.role === 'Mage' && <Sparkles size={20} />}
-                            </div>
-                            {/* Health Bar (Fake Visual) */}
-                            <div className="w-8 h-1 bg-black/50 mt-1 rounded-full overflow-hidden">
-                                <div className="h-full bg-green-500 w-3/4"></div>
+                                w-12 h-12 rounded-xl flex items-center justify-center shadow-lg border-2 relative
+                                ${hero.role === 'Warrior' ? 'bg-red-900/90 border-red-500/50 text-red-200' : ''}
+                                ${hero.role === 'Rogue' ? 'bg-emerald-900/90 border-emerald-500/50 text-emerald-200' : ''}
+                                ${hero.role === 'Mage' ? 'bg-blue-900/90 border-blue-500/50 text-blue-200' : ''}
+                            `}>
+                                {hero.role === 'Warrior' && <ShieldAlert size={24} />}
+                                {hero.role === 'Rogue' && <Crosshair size={24} />}
+                                {hero.role === 'Mage' && <Sparkles size={24} />}
+                                
+                                {/* Status Indicator */}
+                                <div className="absolute -bottom-1 w-8 h-1 bg-black/50 rounded-full overflow-hidden">
+                                    <div className="h-full bg-green-500 w-[90%]"></div>
+                                </div>
                             </div>
                         </div>
                     );
                 })}
             </div>
 
-            {/* VS Effect (Subtle) */}
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white/5 font-black text-6xl italic pointer-events-none">
+            {/* VS Effect */}
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-10 font-black text-8xl italic pointer-events-none text-white mix-blend-overlay">
                 VS
             </div>
 
             {/* --- RIGHT SIDE: ENEMY --- */}
             <div className={`
-                flex flex-col items-center justify-center z-10
-                ${!enemyAttacking ? 'animate-float' : 'animate-attack-enemy'}
-                ${heroAttacking !== null ? 'animate-hit' : ''}
+                flex flex-col items-center justify-center z-10 relative
+                ${enemyState === 'ATTACK' ? 'animate-lunge-left' : enemyState === 'HIT' ? 'animate-shake-white' : 'animate-float-slow'}
             `}>
-                <div className="w-16 h-16 rounded-xl bg-slate-950/80 border-2 border-red-900/50 flex items-center justify-center shadow-2xl relative">
-                    {/* Enemy Icon based on ID */}
+                <div className={`
+                    w-20 h-20 rounded-2xl border-4 flex items-center justify-center shadow-[0_0_30px_rgba(0,0,0,0.5)] relative bg-slate-950
+                    ${enemyState === 'HIT' ? 'border-white' : 'border-red-900/50'}
+                `}>
                     <EnemyIcon id={dungeon.enemyId} />
                     
                     {/* Level Badge */}
-                    <div className="absolute -top-2 -right-2 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center text-[10px] font-bold text-white border border-red-800">
+                    <div className="absolute -top-3 -right-3 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-slate-900 shadow-lg">
                         {dungeon.level}
                     </div>
                 </div>
-                 {/* Enemy Health Bar (Fake Visual) */}
-                 <div className="w-14 h-1.5 bg-black/50 mt-2 rounded-full overflow-hidden border border-black/30">
-                    <div className="h-full bg-red-600 w-full animate-pulse"></div>
+                
+                {/* Health Bar */}
+                <div className="w-20 h-2 bg-slate-900/80 mt-3 rounded-full overflow-hidden border border-slate-700">
+                    <div className="h-full bg-gradient-to-r from-red-600 to-red-500 w-full animate-pulse-slow"></div>
                 </div>
-                <span className="text-[10px] font-bold text-red-400 mt-1 bg-black/40 px-2 py-0.5 rounded uppercase tracking-wider">
+                
+                <span className={`text-[10px] font-bold mt-1 px-2 py-0.5 rounded uppercase tracking-wider bg-black/60 ${theme.accentColor}`}>
                     {enemy.name}
                 </span>
             </div>
@@ -133,11 +192,11 @@ export const CombatStage: React.FC<CombatStageProps> = ({ dungeonId, adventurerI
 };
 
 const EnemyIcon: React.FC<{ id: string }> = ({ id }) => {
-    // Simple icon mapping
-    if (id.includes('rat')) return <span className="text-2xl">🐀</span>;
-    if (id.includes('goblin')) return <span className="text-2xl">👺</span>;
-    if (id.includes('wolf')) return <span className="text-2xl">🐺</span>;
-    if (id.includes('skeleton')) return <Skull size={32} className="text-slate-300" />;
-    if (id.includes('dragon')) return <span className="text-2xl">🐲</span>;
-    return <Skull size={32} className="text-red-500" />;
+    if (id.includes('rat')) return <span className="text-4xl drop-shadow-md">🐀</span>;
+    if (id.includes('goblin')) return <span className="text-4xl drop-shadow-md">👺</span>;
+    if (id.includes('wolf')) return <span className="text-4xl drop-shadow-md">🐺</span>;
+    if (id.includes('skeleton')) return <Skull size={40} className="text-slate-300 drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]" />;
+    if (id.includes('dragon')) return <span className="text-4xl drop-shadow-md">🐲</span>;
+    if (id.includes('void')) return <Zap size={40} className="text-indigo-400 drop-shadow-[0_0_15px_rgba(129,140,248,0.8)]" />;
+    return <Skull size={40} className="text-red-500" />;
 };
