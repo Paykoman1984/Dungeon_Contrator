@@ -1,24 +1,27 @@
 
 import React, { useState } from 'react';
 import { useGame } from '../services/GameContext';
-import { Item, ItemType, Rarity } from '../types';
-import { formatNumber } from '../utils/gameMath';
-import { Trash2, X, CheckSquare, Layers, Box, CheckCircle, AlertTriangle, Package, Filter, Lock } from 'lucide-react';
-import { RARITY_COLORS, RARITY_BG_COLORS, INVENTORY_SIZE, MATERIALS, LOOT_FILTER_UNLOCK_COST } from '../constants';
+import { Item, ItemType, Rarity, ConsumableType } from '../types';
+import { formatNumber, checkResourceCost } from '../utils/gameMath';
+import { Trash2, X, CheckSquare, Layers, Box, CheckCircle, AlertTriangle, Package, Filter, Lock, Hammer, FlaskConical, Swords, Timer, Zap, Coins, Star } from 'lucide-react';
+import { RARITY_COLORS, RARITY_BG_COLORS, INVENTORY_SIZE, MATERIALS, LOOT_FILTER_UNLOCK_COST, CONSUMABLES, CRAFTING_RECIPES } from '../constants';
 import { ItemIcon } from './ItemIcon';
 import { ItemDetailsModal } from './ItemDetailsModal';
 import { LootFilterModal } from './LootFilterModal';
 
 export const InventoryPanel: React.FC = () => {
-  const { state, salvageManyItems, unlockLootFilter } = useGame();
+  const { state, salvageManyItems, unlockLootFilter, craftConsumable, craftEquipment, sellResource } = useGame();
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
-  const [activeTab, setActiveTab] = useState<'EQUIPMENT' | 'MATERIALS'>('EQUIPMENT');
+  const [activeTab, setActiveTab] = useState<'EQUIPMENT' | 'MATERIALS' | 'WORKSHOP'>('EQUIPMENT');
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   
   // Bulk Mode States (Equipment Only)
   const [isBulkMode, setIsBulkMode] = useState(false);
   const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([]);
   const [isConfirmingBulk, setIsConfirmingBulk] = useState(false);
+
+  // Workshop Sub-tab
+  const [workshopTab, setWorkshopTab] = useState<'ALCHEMY' | 'SMITHING'>('ALCHEMY');
 
   const toggleBulkMode = () => {
       setIsBulkMode(!isBulkMode);
@@ -60,6 +63,23 @@ export const InventoryPanel: React.FC = () => {
   // Cast Object.entries to ensure value is typed as number
   const materialsList = (Object.entries(state.materials) as [string, number][]).filter(([_, count]) => count > 0);
 
+  // --- Render Helpers for Workshop ---
+  const renderCost = (costs: { resourceId: string, amount: number }[]) => (
+      <div className="flex flex-wrap gap-2 text-[10px] mt-2">
+          {costs.map((cost, i) => {
+              const mat = MATERIALS[cost.resourceId];
+              const owned = state.materials[cost.resourceId] || 0;
+              const hasEnough = owned >= cost.amount;
+              return (
+                  <div key={i} className={`px-2 py-1 rounded border flex items-center gap-1 ${hasEnough ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-red-900/20 border-red-500/30 text-red-300'}`}>
+                      <span className={hasEnough ? RARITY_COLORS[mat.rarity] : ''}>{mat.name}</span>
+                      <span className="font-mono">{owned}/{cost.amount}</span>
+                  </div>
+              )
+          })}
+      </div>
+  );
+
   return (
     <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto pb-20">
       
@@ -76,20 +96,26 @@ export const InventoryPanel: React.FC = () => {
 
       {/* Header & Tabs */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-100 mb-6">Inventory</h1>
+        <h1 className="text-2xl font-bold text-slate-100 mb-6">Inventory & Crafting</h1>
         
-        <div className="flex border-b border-slate-800">
+        <div className="flex border-b border-slate-800 overflow-x-auto no-scrollbar">
             <button 
                 onClick={() => { setActiveTab('EQUIPMENT'); setIsBulkMode(false); }}
-                className={`px-6 py-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'EQUIPMENT' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                className={`px-6 py-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap ${activeTab === 'EQUIPMENT' ? 'border-indigo-500 text-indigo-400 bg-indigo-500/10' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
             >
                 <Package size={18} /> Equipment
             </button>
             <button 
                 onClick={() => { setActiveTab('MATERIALS'); setIsBulkMode(false); }}
-                className={`px-6 py-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'MATERIALS' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                className={`px-6 py-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap ${activeTab === 'MATERIALS' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
             >
                 <Layers size={18} /> Materials
+            </button>
+            <button 
+                onClick={() => { setActiveTab('WORKSHOP'); setIsBulkMode(false); }}
+                className={`px-6 py-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap ${activeTab === 'WORKSHOP' ? 'border-orange-500 text-orange-400 bg-orange-500/10' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            >
+                <Hammer size={18} /> Workshop
             </button>
         </div>
       </div>
@@ -275,7 +301,6 @@ export const InventoryPanel: React.FC = () => {
       {/* 2. MATERIALS TAB */}
       {activeTab === 'MATERIALS' && (
           <div className="bg-slate-900/30 p-6 rounded-xl border border-slate-800/50 animate-in fade-in slide-in-from-right-4 duration-300 min-h-[400px]">
-              
               {materialsList.length === 0 ? (
                   <div className="h-64 flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-800 rounded-lg">
                       <Layers size={48} className="mb-4 opacity-50" />
@@ -287,8 +312,10 @@ export const InventoryPanel: React.FC = () => {
                       {materialsList.map(([matId, count]) => {
                           const mat = MATERIALS[matId];
                           if (!mat) return null;
+                          const sellValue = mat.value * 5; // Sell in batches
+                          
                           return (
-                              <div key={matId} className="bg-slate-900 border border-slate-700 p-4 rounded-lg flex flex-col gap-3 shadow-lg hover:border-slate-500 transition-colors group">
+                              <div key={matId} className="bg-slate-900 border border-slate-700 p-4 rounded-lg flex flex-col gap-3 shadow-lg hover:border-slate-500 transition-colors group relative">
                                    <div className="flex justify-between items-start">
                                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center bg-slate-800 border border-slate-700 ${RARITY_COLORS[mat.rarity]}`}>
                                            <Box size={20} />
@@ -301,8 +328,155 @@ export const InventoryPanel: React.FC = () => {
                                        <div className={`font-bold ${RARITY_COLORS[mat.rarity]}`}>{mat.name}</div>
                                        <div className="text-[10px] text-slate-500 mt-1 line-clamp-2">{mat.description}</div>
                                    </div>
+                                   
+                                   {/* Simple Sell Button */}
+                                   {count >= 5 && (
+                                       <button 
+                                            onClick={() => sellResource(matId, 5)}
+                                            className="mt-2 text-[10px] w-full py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-slate-400 flex items-center justify-center gap-1"
+                                       >
+                                           Sell 5 ({sellValue}g)
+                                       </button>
+                                   )}
                               </div>
                           );
+                      })}
+                  </div>
+              )}
+          </div>
+      )}
+
+      {/* 3. WORKSHOP TAB */}
+      {activeTab === 'WORKSHOP' && (
+          <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+              {/* Active Effects Display */}
+              {state.activeConsumables.length > 0 && (
+                  <div className="mb-6 bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-xl">
+                      <h3 className="text-sm font-bold text-indigo-300 flex items-center gap-2 mb-3">
+                          <Zap size={16} /> Active Effects
+                      </h3>
+                      <div className="flex flex-wrap gap-3">
+                          {state.activeConsumables.map(active => {
+                              const def = CONSUMABLES.find(c => c.id === active.defId);
+                              if (!def) return null;
+                              const timeLeft = Math.max(0, active.endTime - Date.now());
+                              const minutes = Math.floor(timeLeft / 60000);
+                              const seconds = Math.floor((timeLeft % 60000) / 1000);
+                              
+                              return (
+                                  <div key={active.id} className="bg-indigo-950/50 px-3 py-2 rounded-lg border border-indigo-500/50 flex items-center gap-3">
+                                      <FlaskConical size={16} className="text-indigo-400" />
+                                      <div>
+                                          <div className="text-xs font-bold text-white">{def.name}</div>
+                                          <div className="text-[10px] font-mono text-indigo-300 flex items-center gap-1">
+                                              <Timer size={10} /> {minutes}:{seconds.toString().padStart(2, '0')}
+                                          </div>
+                                      </div>
+                                  </div>
+                              )
+                          })}
+                      </div>
+                  </div>
+              )}
+
+              {/* Sub-Tabs */}
+              <div className="flex gap-4 mb-4">
+                  <button 
+                      onClick={() => setWorkshopTab('ALCHEMY')}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${workshopTab === 'ALCHEMY' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                  >
+                      <FlaskConical size={16} /> Alchemy
+                  </button>
+                  <button 
+                      onClick={() => setWorkshopTab('SMITHING')}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all ${workshopTab === 'SMITHING' ? 'bg-orange-600 text-white shadow-lg shadow-orange-900/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                  >
+                      <Hammer size={16} /> Smithing
+                  </button>
+              </div>
+
+              {workshopTab === 'ALCHEMY' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {CONSUMABLES.map(recipe => {
+                          const canAfford = state.gold >= recipe.goldCost && checkResourceCost(state, recipe.cost);
+                          
+                          return (
+                              <div key={recipe.id} className="bg-slate-800 border border-slate-700 p-4 rounded-lg flex flex-col justify-between">
+                                  <div>
+                                      <div className="flex justify-between items-start mb-2">
+                                          <h4 className="font-bold text-slate-200">{recipe.name}</h4>
+                                          <span className="text-[10px] bg-purple-900/30 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30">
+                                              {(recipe.duration / 60000).toFixed(0)}m
+                                          </span>
+                                      </div>
+                                      <p className="text-xs text-slate-400 mb-3 min-h-[32px]">{recipe.description}</p>
+                                      
+                                      <div className="bg-slate-900/50 p-2 rounded mb-3">
+                                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Required</div>
+                                          <div className="flex items-center gap-2 text-xs font-mono text-yellow-500 mb-1">
+                                              <Coins size={10} /> {formatNumber(recipe.goldCost)}g
+                                          </div>
+                                          {renderCost(recipe.cost)}
+                                      </div>
+                                  </div>
+                                  
+                                  <button
+                                      onClick={() => craftConsumable(recipe.id)}
+                                      disabled={!canAfford}
+                                      className={`w-full py-2 rounded font-bold text-sm transition-all flex items-center justify-center gap-2
+                                          ${canAfford 
+                                              ? 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/20' 
+                                              : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                          }
+                                      `}
+                                  >
+                                      <FlaskConical size={14} /> Brew
+                                  </button>
+                              </div>
+                          )
+                      })}
+                  </div>
+              )}
+
+              {workshopTab === 'SMITHING' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {CRAFTING_RECIPES.map(recipe => {
+                          const canAfford = state.gold >= recipe.goldCost && checkResourceCost(state, recipe.cost);
+                          
+                          return (
+                              <div key={recipe.id} className="bg-slate-800 border border-slate-700 p-4 rounded-lg flex flex-col justify-between">
+                                  <div>
+                                      <div className="flex justify-between items-start mb-2">
+                                          <h4 className={`font-bold ${RARITY_COLORS[recipe.targetRarity]}`}>{recipe.name}</h4>
+                                          <span className="text-[10px] bg-slate-900 text-slate-400 px-2 py-0.5 rounded border border-slate-700">
+                                              Lvl {recipe.targetLevel}
+                                          </span>
+                                      </div>
+                                      <p className="text-xs text-slate-400 mb-3 min-h-[32px]">{recipe.description}</p>
+                                      
+                                      <div className="bg-slate-900/50 p-2 rounded mb-3">
+                                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Required</div>
+                                          <div className="flex items-center gap-2 text-xs font-mono text-yellow-500 mb-1">
+                                              <Coins size={10} /> {formatNumber(recipe.goldCost)}g
+                                          </div>
+                                          {renderCost(recipe.cost)}
+                                      </div>
+                                  </div>
+                                  
+                                  <button
+                                      onClick={() => craftEquipment(recipe.id)}
+                                      disabled={!canAfford}
+                                      className={`w-full py-2 rounded font-bold text-sm transition-all flex items-center justify-center gap-2
+                                          ${canAfford 
+                                              ? 'bg-orange-600 hover:bg-orange-500 text-white shadow-lg shadow-orange-900/20' 
+                                              : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                                          }
+                                      `}
+                                  >
+                                      <Hammer size={14} /> Forge
+                                  </button>
+                              </div>
+                          )
                       })}
                   </div>
               )}

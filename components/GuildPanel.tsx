@@ -1,8 +1,9 @@
+
 import React from 'react';
 import { useGame } from '../services/GameContext';
-import { UPGRADES } from '../constants';
-import { formatNumber, calculateGuildLevel } from '../utils/gameMath';
-import { TrendingUp, Coins, Zap, Box, Activity, Crown, Scroll, Skull } from 'lucide-react';
+import { UPGRADES, MATERIALS, RARITY_COLORS } from '../constants';
+import { formatNumber, calculateGuildLevel, checkResourceCost } from '../utils/gameMath';
+import { TrendingUp, Coins, Zap, Box, Activity, Crown, Scroll, Skull, Hammer } from 'lucide-react';
 
 export const GuildPanel: React.FC = () => {
   const { state, buyUpgrade } = useGame();
@@ -36,66 +37,86 @@ export const GuildPanel: React.FC = () => {
       {/* Left Column: Upgrades (2/3 width on large screens) */}
       <div className="lg:col-span-2 space-y-4">
         <h2 className="text-xl font-bold text-slate-200 mb-4 flex items-center gap-2">
-            <Zap className="text-yellow-500" size={24}/>
+            <Hammer className="text-indigo-500" size={24}/>
             Operations Upgrade
         </h2>
         <div className="grid grid-cols-1 gap-4">
             {UPGRADES.map(upgrade => {
                 const currentLevel = state.upgrades[upgrade.id] || 0;
-                const cost = Math.floor(upgrade.cost * Math.pow(upgrade.costMultiplier, currentLevel));
-                const canAfford = state.gold >= cost;
+                const goldCost = Math.floor(upgrade.cost * Math.pow(upgrade.costMultiplier, currentLevel));
+                
+                // Resource Cost Logic
+                const resourceCosts = upgrade.resourceCost ? upgrade.resourceCost(currentLevel) : [];
+                const hasGold = state.gold >= goldCost;
+                const hasResources = checkResourceCost(state, resourceCosts);
+                const canAfford = hasGold && hasResources;
                 const isMax = currentLevel >= upgrade.maxLevel;
 
                 return (
                     <div key={upgrade.id} className="bg-slate-800 border border-slate-700 p-4 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all hover:border-slate-600">
-                        <div className="flex gap-4 items-center">
+                        <div className="flex gap-4 items-center flex-1">
                             <div className="p-3 bg-slate-900 rounded-lg border border-slate-700 shadow-inner">
                                 {getIcon(upgrade.type)}
                             </div>
-                            <div>
-                                <h3 className="font-bold text-slate-200 text-lg">{upgrade.name}</h3>
-                                <p className="text-sm text-slate-400">{upgrade.description}</p>
-                                <div className="mt-1 flex items-center gap-2">
+                            <div className="flex-1">
+                                <div className="flex justify-between items-start">
+                                    <h3 className="font-bold text-slate-200 text-lg">{upgrade.name}</h3>
                                     <span className="text-xs font-mono bg-slate-900 text-slate-300 px-2 py-0.5 rounded border border-slate-700">
                                         Lvl {currentLevel} / {upgrade.maxLevel}
                                     </span>
-                                    {/* Show next level effect preview if not max */}
-                                    {!isMax && (
-                                        <span className="text-xs text-green-400/80">
-                                            Next: +{upgrade.effect(currentLevel + 1) - upgrade.effect(currentLevel) < 1 
-                                                ? `${((upgrade.effect(currentLevel + 1) - upgrade.effect(currentLevel)) * 100).toFixed(0)}%`
-                                                : upgrade.effect(currentLevel + 1) - upgrade.effect(currentLevel)
-                                            }
-                                        </span>
-                                    )}
                                 </div>
+                                <p className="text-sm text-slate-400">{upgrade.description}</p>
+                                
+                                {/* Next Level Preview */}
+                                {!isMax && (
+                                    <div className="mt-1 text-xs text-green-400/80">
+                                        Next: +{upgrade.effect(currentLevel + 1) - upgrade.effect(currentLevel) < 1 
+                                            ? `${((upgrade.effect(currentLevel + 1) - upgrade.effect(currentLevel)) * 100).toFixed(0)}%`
+                                            : upgrade.effect(currentLevel + 1) - upgrade.effect(currentLevel)
+                                        }
+                                    </div>
+                                )}
                             </div>
                         </div>
                         
-                        <button
-                            onClick={() => buyUpgrade(upgrade.id)}
-                            disabled={!canAfford || isMax}
-                            className={`
-                                w-full sm:w-auto px-6 py-3 rounded-lg text-sm font-bold flex flex-col items-center justify-center transition-all active:scale-95
-                                ${isMax 
-                                    ? 'bg-slate-900 text-slate-500 border border-slate-800 cursor-default' 
-                                    : canAfford 
-                                        ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20' 
-                                        : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                }
-                            `}
-                        >
-                            {isMax ? (
-                                <span>MAX LEVEL</span>
-                            ) : (
-                                <>
-                                    <span>UPGRADE</span>
-                                    <span className={`text-xs font-mono ${canAfford ? 'text-indigo-200' : 'text-slate-400'}`}>
-                                        {formatNumber(cost)} g
-                                    </span>
-                                </>
+                        <div className="flex flex-col gap-2 w-full sm:w-auto">
+                            {/* Cost Display */}
+                            {!isMax && (
+                                <div className="flex flex-col gap-1 text-xs bg-black/20 p-2 rounded">
+                                    <div className={`flex justify-between gap-4 font-mono ${hasGold ? 'text-yellow-500' : 'text-red-400'}`}>
+                                        <span>Gold:</span>
+                                        <span>{formatNumber(goldCost)}g</span>
+                                    </div>
+                                    {resourceCosts.map((cost, idx) => {
+                                        const mat = MATERIALS[cost.resourceId];
+                                        const playerAmt = state.materials[cost.resourceId] || 0;
+                                        const hasMat = playerAmt >= cost.amount;
+                                        return (
+                                            <div key={idx} className={`flex justify-between gap-4 font-mono ${hasMat ? RARITY_COLORS[mat.rarity] : 'text-red-400'}`}>
+                                                <span>{mat.name}:</span>
+                                                <span>{playerAmt}/{cost.amount}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             )}
-                        </button>
+
+                            <button
+                                onClick={() => buyUpgrade(upgrade.id)}
+                                disabled={!canAfford || isMax}
+                                className={`
+                                    w-full px-6 py-2 rounded-lg text-sm font-bold flex items-center justify-center transition-all active:scale-95
+                                    ${isMax 
+                                        ? 'bg-slate-900 text-slate-500 border border-slate-800 cursor-default' 
+                                        : canAfford 
+                                            ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20' 
+                                            : 'bg-slate-700 text-slate-500 cursor-not-allowed opacity-50'
+                                    }
+                                `}
+                            >
+                                {isMax ? 'MAX LEVEL' : 'UPGRADE'}
+                            </button>
+                        </div>
                     </div>
                 )
             })}
