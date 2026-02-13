@@ -6,6 +6,7 @@ import { formatNumber, calculateAdventurerPower, calculateItemUpgradeCost, calcu
 import { Trash2, Ban, Hammer, RefreshCw, PlusCircle, Info, X, Check, Shirt, User, ArrowRight, Lock, AlertTriangle, Box } from 'lucide-react';
 import { RARITY_COLORS, MAX_STATS_BY_RARITY, ADVENTURER_RARITY_MULTIPLIERS, STAT_TIER_COLORS, MATERIALS } from '../constants';
 import { ItemIcon } from './ItemIcon';
+import { AdventurerAvatar } from './AdventurerAvatar'; // New Import
 
 interface ItemDetailsModalProps {
     item: Item | null;
@@ -171,8 +172,12 @@ export const ItemDetailsModal: React.FC<ItemDetailsModalProps> = ({ item, onClos
                             
                             <div className="bg-slate-950/50 border border-slate-800 rounded p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-full ${isEquipped ? 'bg-indigo-900/30 text-indigo-400' : 'bg-slate-800 text-slate-500'}`}>
-                                        <User size={20} />
+                                    <div className="rounded-full overflow-hidden w-10 h-10 border border-slate-700">
+                                        {isEquipped && holder ? (
+                                            <AdventurerAvatar adventurer={holder} size="sm" />
+                                        ) : (
+                                            <div className="w-full h-full bg-slate-800 flex items-center justify-center text-slate-500"><User size={20} /></div>
+                                        )}
                                     </div>
                                     <div>
                                         <div className="text-sm font-bold text-slate-300">

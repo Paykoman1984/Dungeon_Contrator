@@ -1,4 +1,3 @@
-
 export enum Rarity {
   COMMON = 'Common',
   UNCOMMON = 'Uncommon',
@@ -54,6 +53,7 @@ export interface FeedbackEvent {
     intensity: 'MINOR' | 'MAJOR' | 'EPIC';
     color?: string;
     icon?: string;
+    contextId?: string; // ID to scope the event (e.g. dungeonId)
 }
 
 export interface RarityVisualDefinition {
@@ -319,81 +319,141 @@ export interface Material {
 export interface Adventurer {
   id: string;
   name: string;
-  title: string; 
+  title?: string;
   role: AdventurerRole;
   rarity: Rarity;
-  
-  // Combat Skill (Primary)
-  level: number; 
+  level: number;
   xp: number;
   xpToNextLevel: number;
-  
-  // Proficiency Skills
-  gatheringLevel: number;
-  gatheringXp: number;
-  
-  fishingLevel: number;
-  fishingXp: number;
-
-  // Hybrid System Fields
-  traits: Trait[]; // The 3 generated traits
-  specialization: string; // "Battle Mage", "Angler", etc.
-  
-  // Legacy support (to be deprecated or mapped)
-  traitId: string; 
-
-  skillPoints: number; 
-  unlockedSkills: string[]; 
-  skillTree: SkillNode[]; 
-  archetype?: string; 
-
+  gatheringLevel?: number;
+  gatheringXp?: number;
+  fishingLevel?: number;
+  fishingXp?: number;
+  traits: Trait[];
+  traitId?: string;
+  specialization?: string;
+  skillPoints: number;
+  unlockedSkills: string[];
+  skillTree?: SkillNode[];
+  archetype?: string;
   slots: {
-    [ItemType.WEAPON]: Item | null;
-    [ItemType.ARMOR]: Item | null;
-    [ItemType.TRINKET]: Item | null;
+      [ItemType.WEAPON]: Item | null;
+      [ItemType.ARMOR]: Item | null;
+      [ItemType.TRINKET]: Item | null;
   };
   baseStats: {
-    damage: number;
-    health: number;
-    speed: number;
-    critChance: number;
+      damage: number;
+      health: number;
+      speed: number;
+      critChance: number;
   };
+}
+
+// --- MISSING INTERFACES ---
+
+export interface Dungeon {
+    id: string;
+    name: string;
+    type: ContractType;
+    tier: number;
+    level: number;
+    description: string;
+    durationSeconds: number;
+    enemyId: string;
+    dropChance: number;
+    recommendedPower: number;
+    mechanicId?: DungeonMechanicId;
+    visualTag?: string;
+    unlockReq?: {
+        minPower?: number;
+        minGuildLevel?: number;
+        minAscension?: number;
+        previousDungeonId?: string;
+        previousDungeonClears?: number;
+    };
+    lootTable?: string[];
+}
+
+export interface Upgrade {
+    id: string;
+    name: string;
+    description: string;
+    type: 'COMBAT' | 'ECONOMY' | 'SPEED' | 'LOOT';
+    cost: number;
+    costMultiplier: number;
+    level: number;
+    maxLevel: number;
+    effect: (level: number) => number;
+    resourceCost?: (level: number) => ResourceCost[];
+}
+
+export interface PrestigeUpgrade {
+    id: string;
+    name: string;
+    description: string;
+    cost: number;
+    costMultiplier: number;
+    level: number;
+    maxLevel: number;
+    effect: (level: number) => number;
 }
 
 export interface Enemy {
-  id: string;
-  name: string;
-  hp: number;
-  xpMin: number;
-  xpMax: number;
-  goldMin: number;
-  goldMax: number;
+    id: string;
+    name: string;
+    hp: number;
+    xpMin: number;
+    xpMax: number;
+    goldMin: number;
+    goldMax: number;
 }
 
-export interface UnlockRequirements {
-    minPower?: number;
-    minGuildLevel?: number;
-    minAscension?: number;
-    previousDungeonId?: string;
-    previousDungeonClears?: number;
-    goldCost?: number;
+export enum RewardEventType {
+    ITEM_DROP = 'ITEM_DROP',
+    ADVENTURER_LEVEL_UP = 'ADVENTURER_LEVEL_UP',
+    DUNGEON_UNLOCK = 'DUNGEON_UNLOCK',
+    MASTERY_LEVEL_UP = 'MASTERY_LEVEL_UP',
+    REALM_LEVEL_UP = 'REALM_LEVEL_UP',
+    ASCENSION = 'ASCENSION'
 }
 
-export interface Dungeon {
-  id: string;
-  name: string;
-  type: ContractType; 
-  tier: number; 
-  level: number; 
-  description: string;
-  durationSeconds: number;
-  enemyId: string; 
-  dropChance: number; 
-  recommendedPower: number; 
-  lootTable?: string[]; 
-  unlockReq?: UnlockRequirements;
-  mechanicId?: DungeonMechanicId; // NEW: Unique Identity
-  visualTag?: string; // e.g., "CRYPT", "FOREST"
+export enum RewardSeverity {
+    MINOR = 'MINOR',
+    MAJOR = 'MAJOR',
+    EPIC = 'EPIC'
+}
+
+export interface RewardEvent {
+    id: string;
+    type: RewardEventType;
+    severity: RewardSeverity;
+    message: string;
+    entityId?: string;
+    metadata?: any;
+    timestamp: number;
+}
+
+export interface DungeonReport {
+    id: string;
+    dungeonName: string;
+    success: boolean;
+    kills: number;
+    goldEarned: number;
+    xpEarned: number;
+    itemsFound: Item[];
+    materialsFound: Record<string, number>;
+    autoSalvagedCount: number;
+    autoSalvagedGold: number;
+    timestamp: number;
+    realmXpEarned: number;
+}
+
+export interface LootFilterSettings {
+    unlocked: boolean;
+    enabled: boolean;
+    minRarity: Rarity;
+    keepTypes: ItemType[];
+    matchAnyStat: string[];
 }
 
 export interface RunSnapshot {
@@ -402,135 +462,50 @@ export interface RunSnapshot {
     goldBonus: number;
     xpBonus: number;
     lootBonus: number;
-    activeModifiers: string[]; 
+    activeModifiers: string[];
 }
 
 export interface ActiveRun {
-  id: string; 
+  id: string;
   dungeonId: string;
-  adventurerIds: string[]; 
+  adventurerIds: string[];
   startTime: number;
-  duration: number; 
+  duration: number;
   runsRemaining: number;
   totalRuns: number;
-  autoRepeat: boolean; 
+  autoRepeat: boolean;
   snapshot: RunSnapshot;
-  adventurerState: Record<string, Adventurer>;
+  adventurerState?: Record<string, Adventurer>;
   modifiedSlots?: Record<string, ItemType[]>;
 }
 
-export interface Upgrade {
-  id: string;
-  name: string;
-  description: string;
-  cost: number;
-  costMultiplier: number;
-  level: number;
-  maxLevel: number;
-  effect: (level: number) => number;
-  type: 'ECONOMY' | 'COMBAT' | 'SPEED' | 'LOOT';
-  // Optional Resource Cost per level
-  resourceCost?: (level: number) => ResourceCost[];
-}
-
-export interface PrestigeUpgrade {
-    id: string;
-    name: string;
-    description: string;
-    cost: number; 
-    costMultiplier: number;
-    level: number;
-    maxLevel: number;
-    effect: (level: number) => number;
-}
-
-export interface DungeonReport {
-  id: string;
-  dungeonName: string;
-  success: boolean;
-  kills: number; 
-  goldEarned: number;
-  xpEarned: number;
-  itemsFound: Item[];
-  materialsFound: Record<string, number>; 
-  autoSalvagedCount: number; 
-  autoSalvagedGold: number; 
-  timestamp: number;
-  realmXpEarned?: number; 
-  bonusesTriggered?: string[]; 
-}
-
-export interface LootFilterSettings {
-    unlocked: boolean;
-    enabled: boolean;
-    minRarity: Rarity; 
-    keepTypes: ItemType[]; 
-    matchAnyStat: string[]; 
-}
-
-// --- REWARD FEEDBACK SYSTEM ---
-
-export enum RewardSeverity {
-    MINOR = 'MINOR',
-    MAJOR = 'MAJOR',
-    EPIC = 'EPIC'
-}
-
-export enum RewardEventType {
-    ITEM_DROP = 'ITEM_DROP',
-    ADVENTURER_LEVEL_UP = 'ADVENTURER_LEVEL_UP',
-    MASTERY_LEVEL_UP = 'MASTERY_LEVEL_UP',
-    REALM_LEVEL_UP = 'REALM_LEVEL_UP',
-    ASCENSION = 'ASCENSION',
-    DUNGEON_UNLOCK = 'DUNGEON_UNLOCK'
-}
-
-export interface RewardEvent {
-    id: string;
-    type: RewardEventType;
-    severity: RewardSeverity;
-    message: string;
-    entityId?: string; // ID of item, adventurer, etc.
-    metadata?: Record<string, any>;
-    timestamp: number;
-}
-
 export interface GameState {
-  // --- RUN STATE ---
-  startTime: number; 
+  startTime: number;
   gold: number;
+  prestigeCurrency: number;
+  ascensionCount: number;
   adventurers: Adventurer[];
-  recruitmentPool: Adventurer[]; 
+  recruitmentPool: Adventurer[];
   refreshCost: number;
   inventory: Item[];
-  activeRuns: ActiveRun[];
   materials: Record<string, number>;
-  activeConsumables: ActiveConsumable[]; // New
-  
-  // --- META STATE ---
-  prestigeCurrency: number;
-  ascensionCount: number; 
-  unlockedDungeons: string[]; 
-  upgrades: { [id: string]: number }; 
-  prestigeUpgrades: { [id: string]: number }; 
-  guildMastery: GuildMastery; 
-  
-  // --- WORLD EVOLUTION (PERMANENT) ---
+  activeRuns: ActiveRun[];
+  activeConsumables: ActiveConsumable[];
+  unlockedDungeons: string[];
+  upgrades: Record<string, number>;
+  prestigeUpgrades: Record<string, number>;
+  guildMastery: GuildMastery;
   realm: RealmState;
-
-  // --- SETTINGS / MISC ---
-  lootFilter: LootFilterSettings; 
-  lastParties: Record<string, string[]>; 
-  recentReports: DungeonReport[]; 
+  lootFilter: LootFilterSettings;
+  lastParties: Record<string, string[]>;
+  recentReports: DungeonReport[];
   lastSaveTime: number;
   statistics: {
     totalGoldEarned: number;
     monstersKilled: number;
     dungeonsCleared: number;
-    dungeonClears: Record<string, number>; 
+    dungeonClears: Record<string, number>;
   };
-  legendaryPityCounter: number; 
-  
-  // --- EVENT SYSTEM ---
+  legendaryPityCounter: number;
   rewardEventQueue: RewardEvent[];
 }

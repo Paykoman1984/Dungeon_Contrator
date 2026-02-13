@@ -10,6 +10,7 @@ import { ItemIcon } from './ItemIcon';
 import { ItemDetailsModal } from './ItemDetailsModal';
 import { SkillTreeModal } from './SkillTreeModal';
 import { RecruitmentModal } from './RecruitmentModal';
+import { AdventurerAvatar } from './AdventurerAvatar'; // New Import
 
 export const AdventurerList: React.FC = () => {
   const { state, renameAdventurer } = useGame();
@@ -109,13 +110,10 @@ export const AdventurerList: React.FC = () => {
               
               {/* Compact Header */}
               <div className="p-3 bg-slate-900/40 border-b border-slate-700/50 flex justify-between items-center group/card">
-                  <div className="flex items-center gap-2.5 flex-grow min-w-0">
-                       {/* Role Icon */}
-                       <div className={`w-10 h-10 flex-shrink-0 rounded bg-slate-900 border border-slate-700 flex items-center justify-center ${roleConfig.color}`}>
-                           {adv.role === AdventurerRole.WARRIOR && <ShieldAlert size={20} />}
-                           {adv.role === AdventurerRole.ROGUE && <Crosshair size={20} />}
-                           {adv.role === AdventurerRole.MAGE && <Sparkles size={20} />}
-                       </div>
+                  <div className="flex items-center gap-3 flex-grow min-w-0">
+                       
+                       {/* Avatar */}
+                       <AdventurerAvatar adventurer={adv} size="md" isBusy={isBusy} />
                        
                        <div className="flex-grow min-w-0 pr-2">
                            {isEditing ? (

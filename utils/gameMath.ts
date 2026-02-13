@@ -300,7 +300,8 @@ export const generateSkillTree = (role: AdventurerRole): { tree: SkillNode[], ar
 };
 
 export const calculateAdventurerSpecialization = (adventurer: Adventurer): SpecializationData => {
-    let combat = 10; 
+    // Removed inherent Combat bias (was 10) to allow traits to determine specialization fairly
+    let combat = 0; 
     let gathering = 0;
     let fishing = 0;
 
@@ -345,7 +346,22 @@ export const calculateAdventurerSpecialization = (adventurer: Adventurer): Speci
     const scores = [combat, gathering, fishing].sort((a,b) => b-a);
     const secondBest = scores[1] || 0;
 
-    if (maxScore > secondBest * 1.2 || (maxScore > 15 && secondBest < 10)) {
+    // Adjusted logic: If maxScore matches exactly, priority is Combat > Gathering > Fishing
+    // But if valid gap or dominant, pick that.
+    
+    // If no traits/stats (all 0), default to Hybrid
+    if (maxScore === 0) {
+        return {
+            type: 'HYBRID',
+            label: 'Novice',
+            scores: { combat, gathering, fishing },
+            efficiencyBonus: 0,
+            color: 'text-slate-400'
+        };
+    }
+
+    // Relaxed threshold: just needs to be strictly greater than second best, OR significantly high
+    if (maxScore > secondBest) {
         if (maxScore === combat) {
             type = 'COMBAT';
             label = 'Combat Specialist';
@@ -363,6 +379,7 @@ export const calculateAdventurerSpecialization = (adventurer: Adventurer): Speci
             bonus = 0.10;
         }
     } else {
+        // Tie or balanced
         type = 'HYBRID';
         label = 'Hybrid Expert';
         color = 'text-purple-400';
@@ -406,7 +423,6 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
     const multiplier = ADVENTURER_RARITY_MULTIPLIERS[rarity];
     const traits = generateTraits(3);
     const { tree, archetype } = generateSkillTree(role);
-    const specialization = "Novice"; 
     const name = ADVENTURER_NAMES[Math.floor(Math.random() * ADVENTURER_NAMES.length)];
     
     const titleOptions = TITLES_BY_ROLE[role];
@@ -414,7 +430,7 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
     const title = titleOptions[titleIndex];
     const initialXpReq = calculateXpRequired(1, 'ADVENTURER');
 
-    return {
+    const tempAdv: Adventurer = {
         id: crypto.randomUUID(),
         name,
         title,
@@ -429,7 +445,7 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
         fishingXp: 0,
         traits: traits,
         traitId: 'legacy', 
-        specialization,
+        specialization: "Novice", // Will be calculated dynamically by UI
         skillPoints: 0,
         unlockedSkills: [],
         skillTree: tree, 
@@ -442,6 +458,12 @@ export const generateCandidate = (fixedRole?: AdventurerRole): Adventurer => {
             critChance: parseFloat((config.baseCrit * multiplier).toFixed(2))
         }
     };
+    
+    // Pre-calculate just to set the string field for initial state data consistency
+    const specData = calculateAdventurerSpecialization(tempAdv);
+    tempAdv.specialization = specData.label;
+
+    return tempAdv;
 };
 
 export const getActiveModifiers = (adventurerIds: string[], state: GameState): string[] => {
@@ -621,7 +643,7 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         stats.lootLuck += spec.efficiencyBonus; 
     } else if (spec.type === 'FISHING') {
         stats.lootLuck += spec.efficiencyBonus * 2; 
-    } else {
+    } else if (spec.type === 'HYBRID') {
         stats.damage *= (1 + (spec.efficiencyBonus / 2));
         stats.goldGain += (spec.efficiencyBonus / 2);
     }

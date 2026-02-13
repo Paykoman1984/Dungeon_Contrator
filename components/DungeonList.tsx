@@ -3,9 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { useGame } from '../services/GameContext';
 import { DUNGEONS, ENEMIES, MATERIALS, REALM_MODIFIERS, CONSUMABLES } from '../constants';
 import { calculateAdventurerPower, calculateDungeonDuration, calculatePartyDps, formatNumber, calculateEffectiveDungeonStats, getEarlyGameBoost, applyDungeonMechanic } from '../utils/gameMath';
-import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Lock, AlertOctagon, CheckSquare, Square as UncheckedSquare, Rocket, Zap, Ghost, Shield, Crosshair, Box, FlaskConical } from 'lucide-react';
+import { Timer, Skull, Users, Plus, X, AlertTriangle, Repeat, Activity, Power, Square, Swords, Leaf, Anchor, Lock, AlertOctagon, CheckSquare, Square as UncheckedSquare, Rocket, Zap, Ghost, Crosshair, Box, FlaskConical } from 'lucide-react';
 import { ContractType, AdventurerRole, DungeonMechanicId, ActiveConsumable } from '../types';
 import { DungeonProgressBar } from './DungeonProgressBar';
+import { CombatStage } from './CombatStage'; // New Import
 
 export const DungeonList: React.FC = () => {
   const { state, startDungeon, cancelDungeon, stopRepeat, toggleDungeonModifier } = useGame();
@@ -207,7 +208,9 @@ export const DungeonList: React.FC = () => {
 
           // Estimate Kills / Yield
           const effectiveEnemyHp = enemy.hp * mechanic.enemyHpMult; // Apply Mechanic HP mod
-          let estimatedKills = Math.floor((currentPartyDps * duration) / effectiveEnemyHp);
+          
+          // FIX: duration is in ms, convert to seconds for calculation against DPS
+          let estimatedKills = Math.floor((currentPartyDps * (duration / 1000)) / effectiveEnemyHp);
           
           if (!isCombat) {
               // For gathering, pretend 1 cycle per 2 "kills" worth of DPS to normalize
@@ -252,6 +255,8 @@ export const DungeonList: React.FC = () => {
 
           // Render Locked State
           if (!isUnlocked) {
+              const prevDungeon = dungeon.unlockReq?.previousDungeonId ? DUNGEONS.find(d => d.id === dungeon.unlockReq?.previousDungeonId) : null;
+              
               return (
                   <div key={dungeon.id} className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex items-center justify-between opacity-60 grayscale group hover:opacity-80 transition-opacity">
                       <div className="flex items-center gap-4">
@@ -270,6 +275,12 @@ export const DungeonList: React.FC = () => {
                           {dungeon.unlockReq?.minPower && <div>Requires {dungeon.unlockReq.minPower} Total Power</div>}
                           {dungeon.unlockReq?.minGuildLevel && <div>Requires Guild Level {dungeon.unlockReq.minGuildLevel}</div>}
                           {dungeon.unlockReq?.minAscension && <div>Requires Ascension {dungeon.unlockReq.minAscension}</div>}
+                          {dungeon.unlockReq?.previousDungeonId && dungeon.unlockReq?.previousDungeonClears && (
+                              <div>
+                                  Req. {dungeon.unlockReq.previousDungeonClears} Clears of {prevDungeon?.name || 'Previous'} 
+                                  <span className="text-slate-400"> ({state.statistics.dungeonClears[dungeon.unlockReq.previousDungeonId] || 0}/{dungeon.unlockReq.previousDungeonClears})</span>
+                              </div>
+                          )}
                       </div>
                   </div>
               )
@@ -349,6 +360,11 @@ export const DungeonList: React.FC = () => {
                    {/* Active Runs List */}
                    {dungeonRuns.length > 0 && (
                        <div className="mt-4 pt-4 border-t border-slate-700/50">
+                           {/* VISUAL BATTLE STAGE */}
+                           <div className="mb-4">
+                               <CombatStage dungeonId={dungeon.id} adventurerIds={dungeonRuns[0].adventurerIds} />
+                           </div>
+
                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
                                <Activity size={12} className="text-green-400"/> Active Operations ({dungeonRuns.length})
                            </h4>

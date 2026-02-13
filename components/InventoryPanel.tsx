@@ -53,6 +53,7 @@ export const InventoryPanel: React.FC = () => {
           salvageManyItems(selectedBulkIds);
           setSelectedBulkIds([]);
           setIsConfirmingBulk(false);
+          setIsBulkMode(false);
       }
   };
 

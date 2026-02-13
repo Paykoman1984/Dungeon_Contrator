@@ -18,7 +18,7 @@ export const DungeonResultModal: React.FC = () => {
     if (!report || isHovered) return;
     const timer = setTimeout(() => {
         dismissReport(report.id);
-    }, 4000); // 4 seconds auto-dismiss
+    }, 1000); // 1 second auto-dismiss
     return () => clearTimeout(timer);
   }, [report, isHovered, dismissReport]);
 
@@ -150,7 +150,7 @@ export const DungeonResultModal: React.FC = () => {
                         className="h-0.5 bg-indigo-500 origin-left"
                         initial={{ scaleX: 1 }}
                         animate={{ scaleX: 0 }}
-                        transition={{ duration: 4, ease: "linear" }}
+                        transition={{ duration: 1, ease: "linear" }}
                     />
                 )}
             </div>
