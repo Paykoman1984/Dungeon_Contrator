@@ -43,7 +43,8 @@ export interface Skill {
 
 // --- VISUAL IDENTITY SYSTEM ---
 
-export type VisualEventType = 'DAMAGE' | 'HEAL' | 'GOLD' | 'XP' | 'CRIT' | 'LEVEL_UP' | 'DROP';
+// Added BOSS_SPAWN to VisualEventType
+export type VisualEventType = 'DAMAGE' | 'HEAL' | 'GOLD' | 'XP' | 'CRIT' | 'LEVEL_UP' | 'DROP' | 'BOSS_SPAWN';
 
 export interface FeedbackEvent {
     id: string;
@@ -54,6 +55,43 @@ export interface FeedbackEvent {
     color?: string;
     icon?: string;
     contextId?: string; // ID to scope the event (e.g. dungeonId)
+}
+
+// --- COMBAT SYSTEM TYPES ---
+
+export interface AdventurerCombatState {
+    id: string;
+    maxHP: number;
+    currentHP: number;
+    dps: number;
+    isCollapsed: boolean;
+    isDead: boolean;
+    recentDamageTaken: number;
+}
+
+export interface EnemyCombatState {
+    id: string;
+    name: string;
+    maxHP: number;
+    currentHP: number;
+    dps: number;
+    isBoss: boolean;
+}
+
+export type CombatStatus = 'ONGOING' | 'VICTORY' | 'DEFEAT';
+
+export interface CombatState {
+    status: CombatStatus;
+    kills: number;
+    recentKills: number;
+    recentDamageDealt: number;
+    isBossActive: boolean;
+    durationTotal: number;
+    timeElapsed: number;
+    timeRemaining: number;
+    adventurers: Record<string, AdventurerCombatState>;
+    pressureDPS: number;
+    enemy: EnemyCombatState;
 }
 
 export interface RarityVisualDefinition {
@@ -477,6 +515,8 @@ export interface ActiveRun {
   snapshot: RunSnapshot;
   adventurerState?: Record<string, Adventurer>;
   modifiedSlots?: Record<string, ItemType[]>;
+  // Added combatState to ActiveRun
+  combatState?: CombatState;
 }
 
 export interface GameState {
