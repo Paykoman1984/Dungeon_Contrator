@@ -341,13 +341,13 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         adventurer.traits.forEach(trait => {
             const template = TRAIT_POOL.find(t => t.name === trait.name);
             const statsObj: any = { 
-                get damage() { return 1; }, set damage(v) { pools.damage.percent += (v - 1); },
-                get health() { return 1; }, set health(v) { pools.health.percent += (v - 1); },
-                get speed() { return 1; }, set speed(v) { pools.speed.percent += (v - 1); },
-                get critChance() { return 0; }, set critChance(v) { pools.crit.flat += v; },
-                get goldGain() { return 0; }, set goldGain(v) { pools.gold.flat += v; },
-                get xpGain() { return 0; }, set xpGain(v) { pools.xp.flat += v; },
-                get lootLuck() { return 0; }, set lootLuck(v) { pools.loot.flat += v; }
+                get damage() { return 1; }, set damage(v: number) { pools.damage.percent += (v - 1); },
+                get health() { return 1; }, set health(v: number) { pools.health.percent += (v - 1); },
+                get speed() { return 1; }, set speed(v: number) { pools.speed.percent += (v - 1); },
+                get critChance() { return 0; }, set critChance(v: number) { pools.crit.flat += v; },
+                get goldGain() { return 0; }, set goldGain(v: number) { pools.gold.flat += v; },
+                get xpGain() { return 0; }, set xpGain(v: number) { pools.xp.flat += v; },
+                get lootLuck() { return 0; }, set lootLuck(v: number) { pools.loot.flat += v; }
             };
             if (template) template.effect(statsObj);
         });
@@ -403,11 +403,11 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         if (item.uniqueEffectId) {
             const unique = UNIQUE_EFFECT_REGISTRY.find(u => u.id === item.uniqueEffectId);
             const statsObj: any = { 
-                get damage() { return 1; }, set damage(v) { pools.damage.percent += (v - 1); },
-                get health() { return 1; }, set health(v) { pools.health.percent += (v - 1); },
-                get speed() { return 1; }, set speed(v) { pools.speed.percent += (v - 1); },
-                get goldGain() { return 0; }, set goldGain(v) { pools.gold.flat += v; },
-                get lootLuck() { return 0; }, set lootLuck(v) { pools.loot.flat += v; }
+                get damage() { return 1; }, set damage(v: number) { pools.damage.percent += (v - 1); },
+                get health() { return 1; }, set health(v: number) { pools.health.percent += (v - 1); },
+                get speed() { return 1; }, set speed(v: number) { pools.speed.percent += (v - 1); },
+                get goldGain() { return 0; }, set goldGain(v: number) { pools.gold.flat += v; },
+                get lootLuck() { return 0; }, set lootLuck(v: number) { pools.loot.flat += v; }
             };
             if (unique?.effect) unique.effect(statsObj);
         }
@@ -417,11 +417,11 @@ export const getAdventurerStats = (adventurer: Adventurer, state: GameState): Ef
         const setDef = ITEM_SETS.find(s => s.id === setId);
         if (setDef && count >= setDef.requiredPieces) {
              const statsObj: any = { 
-                get damage() { return 1; }, set damage(v) { pools.damage.percent += (v - 1); },
-                get health() { return 1; }, set health(v) { pools.health.percent += (v - 1); },
-                get speed() { return 1; }, set speed(v) { pools.speed.percent += (v - 1); },
-                get goldGain() { return 0; }, set goldGain(v) { pools.gold.flat += v; },
-                get xpGain() { return 0; }, set xpGain(v) { pools.xp.flat += v; }
+                get damage() { return 1; }, set damage(v: number) { pools.damage.percent += (v - 1); },
+                get health() { return 1; }, set health(v: number) { pools.health.percent += (v - 1); },
+                get speed() { return 1; }, set speed(v: number) { pools.speed.percent += (v - 1); },
+                get goldGain() { return 0; }, set goldGain(v: number) { pools.gold.flat += v; },
+                get xpGain() { return 0; }, set xpGain(v: number) { pools.xp.flat += v; }
             };
             setDef.effect(statsObj);
         }
@@ -710,8 +710,8 @@ export const initializeCombat = (dungeonId: string, adventurerIds: string[], sta
 export const processCombatTick = (run: ActiveRun, deltaMs: number): ActiveRun => {
     if (!run.combatState || run.combatState.status !== 'ONGOING') return run;
     
-    // Fix: Explicitly type and ensure CombatState narrowing to prevent 'unknown' property inference
-    const combatState = run.combatState!;
+    // Explicit typing to CombatState
+    const combatState = run.combatState as CombatState;
     const nextCombat: CombatState = { 
         ...combatState, 
         adventurers: { ...combatState.adventurers }, 
@@ -720,28 +720,37 @@ export const processCombatTick = (run: ActiveRun, deltaMs: number): ActiveRun =>
         recentKills: 0 
     };
 
-    nextCombat.timeElapsed += deltaMs;
-    if (!nextCombat.isBossActive) nextCombat.timeRemaining = Math.max(0, nextCombat.durationTotal - nextCombat.timeElapsed); else nextCombat.timeRemaining = 0;
+    // Explicit casting to number for arithmetic operations to resolve TS errors
+    const currentElapsed = Number(nextCombat.timeElapsed || 0);
+    nextCombat.timeElapsed = currentElapsed + deltaMs;
+
+    const durationTotal = Number(nextCombat.durationTotal || 0);
+    if (!nextCombat.isBossActive) {
+        nextCombat.timeRemaining = Math.max(0, durationTotal - nextCombat.timeElapsed); 
+    } else {
+        nextCombat.timeRemaining = 0;
+    }
     
     const activeIds = Object.keys(nextCombat.adventurers).filter(id => !nextCombat.adventurers[id].isCollapsed);
     if (activeIds.length === 0) { nextCombat.status = 'DEFEAT'; return { ...run, combatState: nextCombat }; }
     
-    let squadDps = activeIds.reduce<number>((sum, id) => {
+    let squadDps = activeIds.reduce<number>((sum: number, id: string) => {
         const adv = nextCombat.adventurers[id];
         // Ensure dps is treated as a number for arithmetic operation
         const val = adv ? Number(adv.dps) : 0;
         return sum + val * (activeIds.length === 1 && Object.keys(nextCombat.adventurers).length > 1 ? 1.2 : 1.0);
     }, 0);
 
-    if (!nextCombat.isBossActive && (nextCombat.timeElapsed / nextCombat.durationTotal) >= 0.8) {
+    if (!nextCombat.isBossActive && (nextCombat.timeElapsed / durationTotal) >= 0.8) {
         nextCombat.isBossActive = true; 
-        nextCombat.pressureDPS *= 1.2;
+        // Cast pressureDPS to number before multiplication
+        nextCombat.pressureDPS = Number(nextCombat.pressureDPS) * 1.2;
         const bossHP = nextCombat.enemy.maxHP * 5;
         nextCombat.enemy = { ...nextCombat.enemy, name: `Elite ${nextCombat.enemy.name}`, maxHP: bossHP, currentHP: bossHP, isBoss: true };
         visualBus.emit({ type: 'BOSS_SPAWN', value: 'BOSS SPAWNED', intensity: 'EPIC', contextId: run.dungeonId });
     }
 
-    // Fix for line 594: cast to number to ensure arithmetic operations work correctly on narrowed properties
+    // Cast to number to ensure arithmetic operations work correctly
     const pressure = Number(nextCombat.pressureDPS);
     const elapsed = Number(nextCombat.timeElapsed);
     const total = Number(nextCombat.durationTotal);
@@ -749,7 +758,7 @@ export const processCombatTick = (run: ActiveRun, deltaMs: number): ActiveRun =>
 
     activeIds.forEach(id => {
         const adv = { ...nextCombat.adventurers[id] }; 
-        // Fix for line 596: ensure arithmetic types for right-hand side of operation
+        // Ensure arithmetic types for right-hand side of operation
         const currentHP = Number(adv.currentHP);
         const tickPart = damageTick / activeIds.length;
         adv.currentHP = Math.max(0, currentHP - tickPart); 
@@ -759,7 +768,8 @@ export const processCombatTick = (run: ActiveRun, deltaMs: number): ActiveRun =>
     });
 
     nextCombat.recentDamageDealt = squadDps * (deltaMs / 1000); 
-    nextCombat.enemy.currentHP -= nextCombat.recentDamageDealt;
+    // Cast currentHP to number
+    nextCombat.enemy.currentHP = Number(nextCombat.enemy.currentHP) - nextCombat.recentDamageDealt;
 
     if (nextCombat.enemy.currentHP <= 0) {
         if (nextCombat.isBossActive) { nextCombat.status = 'VICTORY'; nextCombat.kills += 10; } 

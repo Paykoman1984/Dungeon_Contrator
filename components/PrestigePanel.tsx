@@ -11,6 +11,7 @@ export const PrestigePanel: React.FC = () => {
 
     const potentialCurrency = calculatePrestigeGain(state.statistics.totalGoldEarned);
     const canPrestige = potentialCurrency > 0;
+    const retainedGold = Math.floor(state.gold * 0.15);
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pb-20">
@@ -43,6 +44,10 @@ export const PrestigePanel: React.FC = () => {
                             <span className="text-indigo-300">Currency on Reset</span>
                             <span className="font-mono font-bold text-white">+{potentialCurrency}</span>
                         </div>
+                        <div className="flex justify-between items-center text-sm p-3 bg-yellow-900/10 rounded border border-yellow-500/30">
+                            <span className="text-yellow-300">Gold Retained (15%)</span>
+                            <span className="font-mono font-bold text-white">{formatNumber(retainedGold)}g</span>
+                        </div>
                     </div>
 
                     <div className="mt-6">
@@ -63,7 +68,7 @@ export const PrestigePanel: React.FC = () => {
                             <div className="animate-in fade-in duration-200">
                                 <div className="bg-red-900/20 border border-red-500/50 p-3 rounded mb-3 text-xs text-red-200 flex items-start gap-2">
                                     <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
-                                    <p>Reset all Gold, Contractors, Items, and Standard Upgrades? This cannot be undone.</p>
+                                    <p>Reset Guild Assets (Contractors, Items). Realm Progress (Rank, Unlocks) is SAVED. This cannot be undone.</p>
                                 </div>
                                 <div className="flex gap-2">
                                     <button 

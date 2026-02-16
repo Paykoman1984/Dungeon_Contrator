@@ -566,21 +566,23 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const gain = Math.floor(Math.sqrt(prev.statistics.totalGoldEarned / 10000));
           if (gain <= 0) return prev;
 
-          const retainedGold = Math.floor(prev.gold * 0.10);
+          // 1. Gold Retention (15%)
+          const retainedGold = Math.floor(prev.gold * 0.15);
 
+          // 2. Meta State Persistence (REALM PERSISTENCE: unlocked modifiers, active modifiers, rank)
           const nextMetaState = {
               prestigeCurrency: prev.prestigeCurrency + gain,
               ascensionCount: (prev.ascensionCount || 0) + 1,
-              unlockedDungeons: prev.unlockedDungeons, 
-              prestigeUpgrades: prev.prestigeUpgrades, 
+              unlockedDungeons: prev.unlockedDungeons, // Keep map progress
+              prestigeUpgrades: prev.prestigeUpgrades,
               realm: {
-                  ...prev.realm,
-                  realmTier: (prev.realm.realmTier || 1) + 1
+                  ...prev.realm, // Keep ALL realm state (rank, xp, modifiers)
+                  realmTier: (prev.realm.realmTier || 1) + 1 // Only Tier increases
               },
-              guildMastery: prev.guildMastery,
+              guildMastery: prev.guildMastery, // Keep Mastery Levels
               statistics: {
                   ...prev.statistics,
-                  dungeonClears: prev.statistics.dungeonClears
+                  dungeonClears: prev.statistics.dungeonClears // Keep clear counts
               }
           };
 
@@ -592,13 +594,24 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
               { currencyGained: gain }
           );
 
+          // 3. Generate a Random Starter Adventurer
+          const newStarter = generateCandidate();
+          
+          // 4. Reset Tavern with 3 fresh candidates
+          const newTavern = [];
+          for(let i=0; i<TAVERN_CONFIG.poolSize; i++) {
+              newTavern.push(generateCandidate());
+          }
+
+          // Return Reset State with Meta Overrides
           return {
               ...INITIAL_STATE, 
               ...nextMetaState, 
               gold: retainedGold + INITIAL_GOLD,
               startTime: Date.now(), 
-              lootFilter: prev.lootFilter,
-              recruitmentPool: [],
+              lootFilter: prev.lootFilter, // Keep Loot Filter settings
+              recruitmentPool: newTavern,
+              adventurers: [newStarter],
               refreshCost: TAVERN_CONFIG.baseRefreshCost,
               rewardEventQueue: [ascensionEvent]
           };
